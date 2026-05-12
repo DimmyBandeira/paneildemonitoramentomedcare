@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Painel Médico</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/@pulsoid/socket@1.0.0/dist/pulsoid-socket.min.js"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 p-6">
+  <header class="mb-8">
+    <h1 class="text-3xl font-semibold">Central de Triagem</h1>
+  </header>
+  <section class="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
+    {% for p in patients %}
+    <article class="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-5 shadow-lg shadow-rose-500/10" data-patient-id="{{ p['id'] }}">
+      <h2 class="text-xl font-medium">Paciente {{ p['username'] }}</h2>
+      <p class="mt-3 text-slate-300">BPM Atual: <span class="text-emerald-400 font-semibold bpm">{{ p['latest_bpm'] or '--' }}</span></p>
+      <p class="text-sm mt-1 status text-emerald-400">Sensor conectado</p>
+      <button class="mt-4 rounded-lg bg-rose-500 px-4 py-2 hover:bg-rose-400 transition" onclick="getInsight({{ p['id'] }})">Gerar Insight IA</button>
+      <div class="insight mt-4 hidden rounded-xl border border-white/10 bg-slate-900/80 p-3 text-sm"></div>
+    </article>
+    {% endfor %}
+  </section>
+
+  <script>
+    function simulatePulse(card){
+      const bpmEl = card.querySelector('.bpm');
+      const status = card.querySelector('.status');
+      const ws = new WebSocket('wss://dev.pulsoid.net/api/v1/data/real_time?access_token=TOKEN_DO_PACIENTE');
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          const bpm = data?.data?.heart_rate ?? data?.heart_rate;
+          if (bpm) bpmEl.textContent = bpm;
+          status.textContent = 'Sensor conectado';
+          status.className = 'text-sm mt-1 status text-emerald-400';
+        } catch (_) {}
+      };
+      ws.onerror = ws.onclose = () => {
+        status.textContent = 'Sensor Desconectado (Baixa Adesão)';
+        status.className = 'text-sm mt-1 status text-rose-400';
+      };
+    }
+
+    document.querySelectorAll('[data-patient-id]').forEach(simulatePulse);
+
+    async function getInsight(patientId){
+      const card = document.querySelector(`[data-patient-id='${patientId}']`);
+      const target = card.querySelector('.insight');
+      target.classList.remove('hidden');
+      target.textContent = 'Gerando análise cardiológica...';
+      const res = await fetch(`/api/gemini/analyze/${patientId}`);
+      const data = await res.json();
+      target.textContent = data.insight || 'Não foi possível gerar insight.';
+    }
+  </script>
+</body>
+</html>
