@@ -3,10 +3,12 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
+from typing import Any
 from pathlib import Path
 
 # import google.generativeai as genai
 from google import genai
+from google.genai import errors as genai_errors
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -92,25 +94,59 @@ async def auth_route(request: Request):
     return JSONResponse(status_code=400, content={"error": "Formato inválido. Use CRM/SP123456 ou CPF com 11 dígitos."})
 
 
+
+def fetch_patients_summary(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT p.id, p.nome, p.identificador, p.idade,
+               COALESCE(p.data_source, 'demo') AS data_source,
+               COALESCE(p.scenario, 'Paciente de demonstração') AS scenario,
+               (SELECT bpm FROM vitals_history vh WHERE vh.paciente_id = p.id ORDER BY timestamp DESC LIMIT 1) AS bpm_atual,
+               (SELECT timestamp FROM vitals_history vh WHERE vh.paciente_id = p.id ORDER BY timestamp DESC LIMIT 1) AS ultimo_evento,
+               (SELECT ROUND(AVG(vh.bpm), 1) FROM vitals_history vh WHERE vh.paciente_id = p.id) AS media_bpm,
+               (SELECT MAX(vh.bpm) FROM vitals_history vh WHERE vh.paciente_id = p.id) AS pico_bpm,
+               (SELECT COUNT(1) FROM vitals_history vh WHERE vh.paciente_id = p.id) AS total_historico
+        FROM users p
+        WHERE p.tipo='paciente'
+        ORDER BY CASE WHEN p.data_source='pulsoid_real' THEN 0 ELSE 1 END, p.id
+        """
+    ).fetchall()
+
+    patients: list[dict[str, Any]] = []
+    for row in rows:
+        patients.append({
+            'id': row['id'],
+            'nome': row['nome'],
+            'identificador': row['identificador'],
+            'idade': row['idade'],
+            'data_source': row['data_source'],
+            'scenario': row['scenario'],
+            'bpm_atual': row['bpm_atual'],
+            'ultimo_evento': row['ultimo_evento'],
+            'media_bpm': row['media_bpm'],
+            'pico_bpm': row['pico_bpm'],
+            'total_historico': row['total_historico'] or 0,
+        })
+    return patients
+
+
 @app.get("/dashboard/medico")
 def dashboard_medico(request: Request):
     with closing(get_conn()) as conn:
-        pacientes = conn.execute(
-            """
-            SELECT p.id, p.nome, p.identificador, p.idade,
-                   (SELECT bpm FROM vitals_history vh WHERE vh.paciente_id = p.id ORDER BY timestamp DESC LIMIT 1) AS bpm_atual,
-                   (SELECT pulsoid_token FROM tokens tk WHERE tk.user_id = p.id LIMIT 1) AS pulsoid_token
-            FROM users p
-            WHERE p.tipo='paciente'
-            ORDER BY p.id
-            """
-        ).fetchall()
+        pacientes = fetch_patients_summary(conn)
 
     return TEMPLATES.TemplateResponse(
         request=request,
         name="dashboard_medico.html",
         context={"pacientes": pacientes},
     )
+
+
+@app.get("/api/patients/summary")
+def get_patients_summary() -> dict[str, list[dict[str, Any]]]:
+    with closing(get_conn()) as conn:
+        patients = fetch_patients_summary(conn)
+    return {"patients": patients}
 
 
 @app.get("/dashboard/paciente")
@@ -141,46 +177,150 @@ def dashboard_paciente(request: Request, cpf: str | None = None):
     )
 
 
+def _build_local_insight(nome: str, idade: int, media_bpm: float, pico_bpm: int, total: int) -> str:
+    if total <= 0:
+        tendencia = "Dados insuficientes na última semana para tendência robusta."
+        insights = (
+            "- Priorizar coleta contínua por pelo menos 7 dias para maior confiabilidade.\n"
+            "- Registrar horários de sono, cafeína e estresse para correlacionar com o BPM.\n"
+            "- Revisar aderência ao sensor para reduzir lacunas de telemetria."
+        )
+    else:
+        if media_bpm >= 100 or pico_bpm >= 130:
+            tendencia = "Tendência de frequência elevada com picos relevantes."
+        elif media_bpm <= 50:
+            tendencia = "Tendência de frequência reduzida, exigindo contexto clínico."
+        else:
+            tendencia = "Tendência estável na maior parte das amostras disponíveis."
+        insights = (
+            "- Manter rotina regular de sono e hidratação para reduzir variabilidade.\n"
+            "- Monitorar gatilhos (estresse, exercício, cafeína) próximos aos picos.\n"
+            "- Se picos/sintomas persistirem, considerar avaliação médica direcionada."
+        )
+
+    return (
+        f"Paciente: {nome} ({idade} anos).\n"
+        f"Amostras (7 dias): {total}. Média: {media_bpm} BPM. Pico: {pico_bpm} BPM.\n\n"
+        f"1) Tendência objetiva\n{tendencia}\n\n"
+        f"2) Insights acionáveis\n{insights}\n\n"
+        "3) Sinais de alerta para investigação\n"
+        "- Dor torácica, dispneia, síncope, palpitações persistentes ou piora funcional.\n"
+        "- Picos repetidos em repouso ou taquicardia associada a sintomas.\n\n"
+        "4) Este relatório é de apoio e não substitui avaliação médica presencial."
+    )
+
+
 @app.post("/api/gemini/analyze/{paciente_id}")
-def gemini_analyze(paciente_id: int):
+def gemini_analyze(paciente_id: int) -> dict[str, Any]:
     with closing(get_conn()) as conn:
         paciente = conn.execute(
-            "SELECT id, nome, idade FROM users WHERE id=? AND tipo='paciente'",
+            "SELECT id, nome, idade, data_source FROM users WHERE id=? AND tipo='paciente'",
             (paciente_id,),
         ).fetchone()
         if not paciente:
-            raise HTTPException(
-                status_code=404, detail="Paciente não encontrado")
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
 
         start = (datetime.utcnow() - timedelta(days=7)).isoformat()
         stats = conn.execute(
             """
-            SELECT ROUND(AVG(bpm), 1) AS media_bpm, MAX(bpm) AS pico_bpm
+            SELECT ROUND(AVG(bpm), 1) AS media_bpm,
+                   MAX(bpm) AS pico_bpm,
+                   COUNT(*) AS total
             FROM vitals_history
             WHERE paciente_id=? AND timestamp >= ?
             """,
             (paciente_id, start),
         ).fetchone()
 
-    media_bpm = stats["media_bpm"] if stats and stats["media_bpm"] is not None else 0
-    pico_bpm = stats["pico_bpm"] if stats and stats["pico_bpm"] is not None else 0
+        rows = conn.execute(
+            """
+            SELECT bpm, timestamp, source
+            FROM vitals_history
+            WHERE paciente_id=? AND timestamp >= ?
+            ORDER BY timestamp DESC
+            LIMIT 30
+            """,
+            (paciente_id, start),
+        ).fetchall()
 
-    prompt = (
-        f"Você é um assistente cardiológico. O paciente {paciente['nome']} tem {paciente['idade']} anos. "
-        f"Nos últimos 7 dias, sua frequência cardíaca de repouso (RHR) média foi de {media_bpm} BPM, "
-        f"com picos de {pico_bpm} BPM. Forneça: 1) Projeção sobre o nível de estresse e qualidade do sono; "
-        "2) Três insights acionáveis sobre mudança de estilo de vida; 3) Possíveis sinais de alerta clínicos "
-        "para investigação. Responda em formato de relatório médico conciso."
+    media_bpm = float(stats["media_bpm"] if stats and stats["media_bpm"] is not None else 0)
+    pico_bpm = int(stats["pico_bpm"] if stats and stats["pico_bpm"] is not None else 0)
+    total = int(stats["total"] if stats else 0)
+
+    history_text = ", ".join(
+        f"{row['bpm']} BPM em {row['timestamp']} ({row['source']})"
+        for row in rows
+    )
+
+    fallback = _build_local_insight(
+        str(paciente["nome"]),
+        int(paciente["idade"]),
+        media_bpm,
+        pico_bpm,
+        total,
     )
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return {"insight": "GEMINI_API_KEY não configurada no .env.", "media_bpm": media_bpm, "pico_bpm": pico_bpm}
+        return {
+            "insight": fallback,
+            "media_bpm": media_bpm,
+            "pico_bpm": pico_bpm,
+            "source": "fallback_no_api_key",
+        }
 
-    # genai.configure(api_key=api_key)
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    response = client.models.generate_content(
-        model="gemini-1.5-flash", contents=prompt)
-    # response = model.generate_content(prompt)
+    prompt = (
+        "Você é um assistente cardiológico de apoio, sem emitir diagnóstico definitivo. "
+        f"Paciente: {paciente['nome']}. "
+        f"Idade: {paciente['idade']} anos. "
+        f"Fonte do paciente: {paciente['data_source']}. "
+        f"Nos últimos 7 dias, média de frequência cardíaca: {media_bpm} BPM, "
+        f"pico: {pico_bpm} BPM, amostras: {total}. "
+        f"Histórico recente: {history_text or 'sem amostras'}. "
+        "Forneça em português: "
+        "1) leitura objetiva de tendência; "
+        "2) três insights acionáveis; "
+        "3) sinais de alerta que justificam investigação; "
+        "4) ressalva de que não substitui avaliação médica. "
+        "Se os dados forem insuficientes, diga isso claramente."
+    )
 
-    return {"insight": (response.text or "").strip(), "media_bpm": media_bpm, "pico_bpm": pico_bpm}
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+            contents=prompt,
+        )
+
+        return {
+            "insight": (response.text or fallback).strip(),
+            "media_bpm": media_bpm,
+            "pico_bpm": pico_bpm,
+            "source": "gemini",
+        }
+
+    except genai_errors.ClientError as exc:
+        return {
+            "insight": (
+                "A IA externa não respondeu agora. "
+                "O sistema manteve a análise local abaixo.\n\n"
+                f"Motivo técnico: {exc}\n\n"
+                f"{fallback}"
+            ),
+            "media_bpm": media_bpm,
+            "pico_bpm": pico_bpm,
+            "source": "fallback_gemini_client_error",
+        }
+
+    except Exception as exc:
+        return {
+            "insight": (
+                "Falha inesperada ao consultar a IA externa. "
+                "O sistema manteve a análise local abaixo.\n\n"
+                f"Motivo técnico: {exc}\n\n"
+                f"{fallback}"
+            ),
+            "media_bpm": media_bpm,
+            "pico_bpm": pico_bpm,
+            "source": "fallback_unexpected_error",
+        }
