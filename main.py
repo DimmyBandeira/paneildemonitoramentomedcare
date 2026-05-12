@@ -5,10 +5,10 @@ from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import google.generativeai as genai
-from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
+from google import genai
 
 DB_PATH = Path("vitals.db")
 BASE_DIR = Path(__file__).resolve().parent
@@ -61,16 +61,9 @@ def seed_db() -> None:
         cur.execute("INSERT INTO users (username, role) VALUES (?, ?)", ("CRM/SP123456", "doctor"))
         doctor_id = cur.lastrowid
 
-        cur.execute(
-            "INSERT INTO users (username, role, doctor_id) VALUES (?, ?, ?)",
-            ("11111111111", "patient", doctor_id),
-        )
+        cur.execute("INSERT INTO users (username, role, doctor_id) VALUES (?, ?, ?)", ("11111111111", "patient", doctor_id))
         patient_1_id = cur.lastrowid
-
-        cur.execute(
-            "INSERT INTO users (username, role, doctor_id) VALUES (?, ?, ?)",
-            ("22222222222", "patient", doctor_id),
-        )
+        cur.execute("INSERT INTO users (username, role, doctor_id) VALUES (?, ?, ?)", ("22222222222", "patient", doctor_id))
         patient_2_id = cur.lastrowid
 
         now = datetime.utcnow()
@@ -79,17 +72,11 @@ def seed_db() -> None:
 
         for idx, bpm in enumerate(patient_1_bpm):
             ts = (now - timedelta(days=idx % 7, hours=idx)).isoformat()
-            cur.execute(
-                "INSERT INTO vitals_history (user_id, bpm, timestamp) VALUES (?, ?, ?)",
-                (patient_1_id, bpm, ts),
-            )
+            cur.execute("INSERT INTO vitals_history (user_id, bpm, timestamp) VALUES (?, ?, ?)", (patient_1_id, bpm, ts))
 
         for idx, bpm in enumerate(patient_2_bpm):
             ts = (now - timedelta(days=idx % 7, hours=idx + 1)).isoformat()
-            cur.execute(
-                "INSERT INTO vitals_history (user_id, bpm, timestamp) VALUES (?, ?, ?)",
-                (patient_2_id, bpm, ts),
-            )
+            cur.execute("INSERT INTO vitals_history (user_id, bpm, timestamp) VALUES (?, ?, ?)", (patient_2_id, bpm, ts))
 
         conn.commit()
 
@@ -106,13 +93,14 @@ def login_page(request: Request):
 
 
 @app.post("/auth")
-def auth(username: str = Form(...)):
-    username = username.strip().upper()
+async def auth(request: Request):
+    payload = await request.json()
+    username = str(payload.get("username", "")).strip().upper()
     if "CRM" in username and re.fullmatch(r"CRM\/[A-Z]{2}\d{6}", username):
-        return RedirectResponse(url="/dashboard/medico", status_code=303)
+        return {"redirect_url": "/dashboard/medico"}
     if re.fullmatch(r"\d{11}", username):
-        return RedirectResponse(url=f"/dashboard/paciente?cpf={username}", status_code=303)
-    return RedirectResponse(url="/?error=Formato inválido", status_code=303)
+        return {"redirect_url": f"/dashboard/paciente?cpf={username}"}
+    return JSONResponse(status_code=400, content={"error": "Formato inválido"})
 
 
 @app.get("/dashboard/medico")
@@ -127,26 +115,21 @@ def doctor_dashboard(request: Request):
             ORDER BY u.id
             """
         ).fetchall()
-    return TEMPLATES.TemplateResponse(request=request, name="dashboard_medico.html", context={"patients": patients})
+    pulsoid_token = os.getenv("PULSOID_ACCESS_TOKEN", "TOKEN_DO_PACIENTE")
+    return TEMPLATES.TemplateResponse(request=request, name="dashboard_medico.html", context={"patients": patients, "pulsoid_token": pulsoid_token})
 
 
 @app.get("/dashboard/paciente")
 def patient_dashboard(request: Request, cpf: str | None = None):
     with closing(get_conn()) as conn:
         if cpf:
-            patient = conn.execute(
-                "SELECT id, username FROM users WHERE role='patient' AND username=? LIMIT 1", (cpf,)
-            ).fetchone()
+            patient = conn.execute("SELECT id, username FROM users WHERE role='patient' AND username=? LIMIT 1", (cpf,)).fetchone()
         else:
             patient = conn.execute("SELECT id, username FROM users WHERE role='patient' ORDER BY id LIMIT 1").fetchone()
     if not patient:
         raise HTTPException(status_code=404, detail="Paciente não encontrado")
     pulsoid_token = os.getenv("PULSOID_ACCESS_TOKEN", "TOKEN_DO_PACIENTE")
-    return TEMPLATES.TemplateResponse(
-        request=request,
-        name="dashboard_paciente.html",
-        context={"patient": patient, "pulsoid_token": pulsoid_token},
-    )
+    return TEMPLATES.TemplateResponse(request=request, name="dashboard_paciente.html", context={"patient": patient, "pulsoid_token": pulsoid_token})
 
 
 @app.post("/api/gemini/analyze/{paciente_id}")
@@ -184,7 +167,6 @@ def analyze_patient(paciente_id: int):
     if not api_key:
         return JSONResponse({"insight": "GEMINI_API_KEY não configurada. Relatório indisponível no ambiente atual."})
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(prompt)
-    return {"insight": response.text.strip()}
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+    return {"insight": (response.text or "").strip()}

@@ -50,7 +50,7 @@
     function simulatePulse(card){
       const bpmEl = card.querySelector('.bpm');
       const status = card.querySelector('.status');
-      const ws = new WebSocket('wss://dev.pulsoid.net/api/v1/data/real_time?access_token=TOKEN_DO_PACIENTE');
+      const ws = new WebSocket('wss://dev.pulsoid.net/api/v1/data/real_time?access_token={{ pulsoid_token }}');
       ws.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
