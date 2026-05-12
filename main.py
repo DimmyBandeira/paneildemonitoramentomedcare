@@ -9,10 +9,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 from google import genai
+from dotenv import load_dotenv
 
 DB_PATH = Path("vitals.db")
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+load_dotenv()
 
 app = FastAPI(title="Monitor Cardiago - MedCare MVP")
 
@@ -115,7 +118,7 @@ def doctor_dashboard(request: Request):
             ORDER BY u.id
             """
         ).fetchall()
-    pulsoid_token = os.getenv("PULSOID_ACCESS_TOKEN", "TOKEN_DO_PACIENTE")
+    pulsoid_token = os.getenv("PULSOID_TOKEN") or os.getenv("PULSOID_ACCESS_TOKEN", "TOKEN_DO_PACIENTE")
     return TEMPLATES.TemplateResponse(request=request, name="dashboard_medico.html", context={"patients": patients, "pulsoid_token": pulsoid_token})
 
 
@@ -128,7 +131,7 @@ def patient_dashboard(request: Request, cpf: str | None = None):
             patient = conn.execute("SELECT id, username FROM users WHERE role='patient' ORDER BY id LIMIT 1").fetchone()
     if not patient:
         raise HTTPException(status_code=404, detail="Paciente não encontrado")
-    pulsoid_token = os.getenv("PULSOID_ACCESS_TOKEN", "TOKEN_DO_PACIENTE")
+    pulsoid_token = os.getenv("PULSOID_TOKEN") or os.getenv("PULSOID_ACCESS_TOKEN", "TOKEN_DO_PACIENTE")
     return TEMPLATES.TemplateResponse(request=request, name="dashboard_paciente.html", context={"patient": patient, "pulsoid_token": pulsoid_token})
 
 
