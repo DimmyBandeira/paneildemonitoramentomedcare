@@ -16,9 +16,10 @@
     <p id="status" class="mt-2 text-emerald-400">Sensor conectado</p>
   </main>
   <script>
+    const pulsoidToken = "{{ pulsoid_token }}";
     const bpmEl = document.getElementById('bpm');
     const statusEl = document.getElementById('status');
-    const ws = new WebSocket('wss://dev.pulsoid.net/api/v1/data/real_time?access_token=TOKEN_DO_PACIENTE');
+    const ws = new WebSocket(`wss://dev.pulsoid.net/api/v1/data/real_time?access_token=${pulsoidToken}`);
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data);
