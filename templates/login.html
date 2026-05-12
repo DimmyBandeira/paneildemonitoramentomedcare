@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitor Cardiago | Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-[#0f172a] text-slate-100">
+  <div class="relative min-h-screen flex items-center justify-center p-6">
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,#f43f5e2e,transparent_50%),radial-gradient(circle_at_bottom,#10b98122,transparent_40%)]"></div>
+    <div class="relative w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur-xl shadow-2xl shadow-rose-500/20">
+      <h1 class="text-3xl font-semibold tracking-tight">Monitor Cardiago</h1>
+      <p class="text-slate-300 mt-2">Login Clínico Inteligente (CRM ou CPF)</p>
+      <form id="login-form" class="mt-8 space-y-4">
+        <label class="block text-sm text-slate-300">CRM ou CPF</label>
+        <input name="credential" required placeholder="CRM/SP123456 ou 11111111111" class="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500" />
+        <button class="w-full rounded-xl bg-rose-500 hover:bg-rose-400 transition py-3 font-medium">Entrar</button>
+      </form>
+      <p id="error" class="mt-3 text-sm text-rose-400 hidden"></p>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('login-form');
+    const errorEl = document.getElementById('error');
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errorEl.classList.add('hidden');
+
+      const credential = form.credential.value;
+      const response = await fetch('/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        errorEl.textContent = data.error || 'Falha no login.';
+        errorEl.classList.remove('hidden');
+        return;
+      }
+
+      window.location.href = data.redirect_url;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Painel do Paciente</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/@pulsoid/socket@1.0.0/dist/pulsoid-socket.min.js"></script>
+</head>
+<body class="min-h-screen bg-[#0f172a] text-white flex items-center justify-center p-6">
+  <main class="w-full max-w-xl rounded-3xl border border-white/10 bg-white/5 backdrop-blur-2xl p-8 text-center shadow-2xl shadow-rose-500/20">
+    <h1 class="text-2xl font-semibold">Telemetria em Tempo Real</h1>
+    <p class="text-slate-300 mt-2">Paciente {{ paciente['nome'] }}</p>
+    <div class="mt-8 text-7xl animate-pulse text-rose-500">❤</div>
+    <div id="bpm" class="mt-4 text-6xl font-bold text-emerald-400">--</div>
+    <p id="status" class="mt-2 text-emerald-400">Conectando ao sensor...</p>
+  </main>
+
+  <script>
+    const token = "{{ pulsoid_token }}";
+    const bpmEl = document.getElementById('bpm');
+    const statusEl = document.getElementById('status');
+
+    const ws = new WebSocket(`wss://dev.pulsoid.net/api/v1/data/real_time?access_token=${token}`);
+
+    ws.onopen = () => {
+      statusEl.textContent = 'Sensor conectado';
+      statusEl.className = 'mt-2 text-emerald-400';
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        const bpm = payload?.data?.heart_rate ?? payload?.heart_rate;
+        if (bpm) bpmEl.textContent = bpm;
+      } catch (_) {}
+    };
+
+    ws.onerror = ws.onclose = () => {
+      statusEl.textContent = 'Sensor Desconectado (Baixa Adesão ao monitoramento)';
+      statusEl.className = 'mt-2 text-rose-400';
+    };
+  </script>
+</body>
+</html>

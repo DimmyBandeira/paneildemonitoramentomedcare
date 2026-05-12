@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Painel Médico</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-[#0f172a] text-slate-100 p-6">
+  <header class="mb-8 flex items-center justify-between">
+    <h1 class="text-3xl font-semibold">Painel Médico • Triagem em Tempo Real</h1>
+  </header>
+
+  <section class="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
+    {% for p in pacientes %}
+    <article class="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-5 shadow-lg shadow-rose-500/10" data-paciente-id="{{ p['id'] }}">
+      <h2 class="text-xl font-medium">{{ p['nome'] }}</h2>
+      <p class="text-slate-400 text-sm">CPF: {{ p['identificador'] }} • {{ p['idade'] }} anos</p>
+      <p class="mt-3 text-slate-300">BPM Atual: <span class="text-emerald-400 font-semibold bpm">{{ p['bpm_atual'] or '--' }}</span></p>
+      <button class="mt-4 rounded-lg bg-rose-500 px-4 py-2 hover:bg-rose-400 transition" onclick="gerarAnalise({{ p['id'] }})">Gerar Análise de Risco e Estilo de Vida (IA)</button>
+    </article>
+    {% endfor %}
+  </section>
+
+  <div id="modal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm items-center justify-center p-4">
+    <div class="w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl shadow-rose-500/20">
+      <div class="flex justify-between items-center">
+        <h3 class="text-xl font-semibold">Relatório Cardiológico (IA)</h3>
+        <button class="text-slate-300 hover:text-white" onclick="closeModal()">✕</button>
+      </div>
+      <pre id="modal-content" class="mt-4 p-4 rounded-xl bg-white/5 border border-white/10 whitespace-pre-wrap text-sm">Carregando...</pre>
+    </div>
+  </div>
+
+  <script>
+    function openModal(content) {
+      document.getElementById('modal-content').textContent = content;
+      const modal = document.getElementById('modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeModal() {
+      const modal = document.getElementById('modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    async function gerarAnalise(pacienteId) {
+      openModal('Gerando análise clínica com Gemini...');
+      try {
+        const response = await fetch(`/api/gemini/analyze/${pacienteId}`, { method: 'POST' });
+        const data = await response.json();
+        openModal(data.insight || 'Sem dados para análise.');
+      } catch (_) {
+        openModal('Falha ao buscar análise de IA.');
+      }
+    }
+  </script>
+</body>
+</html>
