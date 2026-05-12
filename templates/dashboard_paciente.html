@@ -31,21 +31,41 @@
     <div id="heart-icon" class="mt-8 text-7xl text-rose-500 drop-shadow-[0_0_18px_rgba(244,63,94,0.6)] animate-[heartbeat_1.2s_ease-in-out_infinite]">❤</div>
     <div id="bpm" class="mt-4 text-6xl font-bold text-emerald-400 transition-colors duration-300">--</div>
     <p id="status" class="mt-2 text-emerald-400">Conectando ao sensor...</p>
+    <p id="save-status" class="mt-2 text-xs text-slate-400">Aguardando primeira amostra para gravar histórico real.</p>
+    <div class="mt-6 flex justify-center gap-3">
+      <a href="/dashboard/medico" class="rounded-lg border border-white/20 px-4 py-2 text-sm text-slate-200 hover:bg-white/10 transition">Voltar ao médico</a>
+    </div>
   </main>
 
   <script>
     const token = "{{ pulsoid_token }}";
+    const pacienteId = Number("{{ paciente['id'] }}");
     const bpmEl = document.getElementById('bpm');
     const statusEl = document.getElementById('status');
+    const saveStatusEl = document.getElementById('save-status');
+    let lastSavedBpm = null;
+    let lastSavedAt = 0;
 
-    const ws = new WebSocket(`wss://dev.pulsoid.net/api/v1/data/real_time?access_token=${token}`);
+    function updateBpmColor(bpm) {
+      bpmEl.classList.remove('text-emerald-400', 'text-amber-400', 'text-rose-400');
+      if (bpm > 100) {
+        bpmEl.classList.add('text-rose-400');
+      } else if (bpm >= 85) {
+        bpmEl.classList.add('text-amber-400');
+      } else {
+        bpmEl.classList.add('text-emerald-400');
+      }
+    }
 
-    ws.onopen = () => {
-      statusEl.textContent = 'Sensor conectado';
-      statusEl.className = 'mt-2 text-emerald-400';
-    };
+    async function saveBpm(bpm) {
+      const now = Date.now();
+      const shouldThrottle = lastSavedBpm === bpm && now - lastSavedAt < 15000;
+      if (shouldThrottle) {
+        return;
+      }
+      lastSavedBpm = bpm;
+      lastSavedAt = now;
 
-    ws.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
         const bpm = payload?.data?.heart_rate ?? payload?.heart_rate;
@@ -66,7 +86,36 @@
     ws.onerror = ws.onclose = () => {
       statusEl.textContent = 'Sensor Desconectado (Baixa Adesão ao monitoramento)';
       statusEl.className = 'mt-2 text-rose-400';
-    };
+      saveStatusEl.textContent = 'Sem token não é possível consumir dados reais do Pulsoid.';
+      saveStatusEl.className = 'mt-2 text-xs text-rose-300';
+    } else {
+      const ws = new WebSocket(`wss://dev.pulsoid.net/api/v1/data/real_time?access_token=${token}`);
+
+      ws.onopen = () => {
+        statusEl.textContent = 'Sensor conectado';
+        statusEl.className = 'mt-2 text-emerald-400';
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          const bpm = Number(payload?.data?.heart_rate ?? payload?.heart_rate ?? 0);
+          if (bpm > 0) {
+            bpmEl.textContent = bpm;
+            updateBpmColor(bpm);
+            saveBpm(bpm);
+          }
+        } catch (error) {
+          saveStatusEl.textContent = `Payload inválido do Pulsoid: ${error}`;
+          saveStatusEl.className = 'mt-2 text-xs text-amber-300';
+        }
+      };
+
+      ws.onerror = ws.onclose = () => {
+        statusEl.textContent = 'Sensor desconectado ou token inválido';
+        statusEl.className = 'mt-2 text-rose-400';
+      };
+    }
   </script>
 </body>
 </html>

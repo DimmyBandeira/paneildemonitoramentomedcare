@@ -88,13 +88,29 @@
     });
 
     async function gerarAnalise(pacienteId) {
-      openModal('Gerando análise clínica com Gemini...');
+      openModal('Gerando análise clínica...', 'Relatório Cardiológico (IA)');
       try {
         const response = await fetch(`/api/gemini/analyze/${pacienteId}`, { method: 'POST' });
         const data = await response.json();
-        openModal(data.insight || 'Sem dados para análise.');
-      } catch (_) {
-        openModal('Falha ao buscar análise de IA.');
+        if (!response.ok) {
+          openModal(data.detail || data.error || 'Falha ao gerar análise.', 'Erro na análise');
+          return;
+        }
+        openModal(data.insight || 'Sem dados para análise.', 'Relatório Cardiológico (IA)', `Fonte: ${data.source || 'desconhecida'}`);
+      } catch (error) {
+        openModal(`Falha ao buscar análise de IA.\n${error}`, 'Erro na análise');
+      }
+    }
+
+    async function abrirHistorico(pacienteId, nome) {
+      openModal('Carregando histórico...', `Histórico de ${nome}`, 'Últimas amostras gravadas');
+      try {
+        const response = await fetch(`/api/patients/${pacienteId}/history?limit=30`);
+        const data = await response.json();
+        const linhas = (data.history || []).map((item) => `${item.timestamp} | ${item.bpm} BPM | ${item.source}`);
+        openModal(linhas.length ? linhas.join('\n') : 'Sem histórico gravado.', `Histórico de ${nome}`, 'Últimas amostras gravadas');
+      } catch (error) {
+        openModal(`Falha ao carregar histórico.\n${error}`, 'Erro no histórico');
       }
     }
 
