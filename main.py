@@ -180,7 +180,7 @@ def gemini_analyze(paciente_id: int):
     # genai.configure(api_key=api_key)
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     response = client.models.generate_content(
-        model="gemini-1.5-flash", contents=prompt)
+        model="gemini-2.0-flash", contents=prompt)
     # response = model.generate_content(prompt)
 
     return {"insight": (response.text or "").strip(), "media_bpm": media_bpm, "pico_bpm": pico_bpm}
