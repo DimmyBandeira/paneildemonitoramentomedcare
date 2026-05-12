@@ -3,6 +3,7 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
+from typing import Any
 from pathlib import Path
 
 # import google.generativeai as genai
@@ -92,25 +93,59 @@ async def auth_route(request: Request):
     return JSONResponse(status_code=400, content={"error": "Formato inválido. Use CRM/SP123456 ou CPF com 11 dígitos."})
 
 
+
+def fetch_patients_summary(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT p.id, p.nome, p.identificador, p.idade,
+               COALESCE(p.data_source, 'demo') AS data_source,
+               COALESCE(p.scenario, 'Paciente de demonstração') AS scenario,
+               (SELECT bpm FROM vitals_history vh WHERE vh.paciente_id = p.id ORDER BY timestamp DESC LIMIT 1) AS bpm_atual,
+               (SELECT timestamp FROM vitals_history vh WHERE vh.paciente_id = p.id ORDER BY timestamp DESC LIMIT 1) AS ultimo_evento,
+               (SELECT ROUND(AVG(vh.bpm), 1) FROM vitals_history vh WHERE vh.paciente_id = p.id) AS media_bpm,
+               (SELECT MAX(vh.bpm) FROM vitals_history vh WHERE vh.paciente_id = p.id) AS pico_bpm,
+               (SELECT COUNT(1) FROM vitals_history vh WHERE vh.paciente_id = p.id) AS total_historico
+        FROM users p
+        WHERE p.tipo='paciente'
+        ORDER BY CASE WHEN p.data_source='pulsoid_real' THEN 0 ELSE 1 END, p.id
+        """
+    ).fetchall()
+
+    patients: list[dict[str, Any]] = []
+    for row in rows:
+        patients.append({
+            'id': row['id'],
+            'nome': row['nome'],
+            'identificador': row['identificador'],
+            'idade': row['idade'],
+            'data_source': row['data_source'],
+            'scenario': row['scenario'],
+            'bpm_atual': row['bpm_atual'],
+            'ultimo_evento': row['ultimo_evento'],
+            'media_bpm': row['media_bpm'],
+            'pico_bpm': row['pico_bpm'],
+            'total_historico': row['total_historico'] or 0,
+        })
+    return patients
+
+
 @app.get("/dashboard/medico")
 def dashboard_medico(request: Request):
     with closing(get_conn()) as conn:
-        pacientes = conn.execute(
-            """
-            SELECT p.id, p.nome, p.identificador, p.idade,
-                   (SELECT bpm FROM vitals_history vh WHERE vh.paciente_id = p.id ORDER BY timestamp DESC LIMIT 1) AS bpm_atual,
-                   (SELECT pulsoid_token FROM tokens tk WHERE tk.user_id = p.id LIMIT 1) AS pulsoid_token
-            FROM users p
-            WHERE p.tipo='paciente'
-            ORDER BY p.id
-            """
-        ).fetchall()
+        pacientes = fetch_patients_summary(conn)
 
     return TEMPLATES.TemplateResponse(
         request=request,
         name="dashboard_medico.html",
         context={"pacientes": pacientes},
     )
+
+
+@app.get("/api/patients/summary")
+def get_patients_summary() -> dict[str, list[dict[str, Any]]]:
+    with closing(get_conn()) as conn:
+        patients = fetch_patients_summary(conn)
+    return {"patients": patients}
 
 
 @app.get("/dashboard/paciente")
@@ -180,7 +215,7 @@ def gemini_analyze(paciente_id: int):
     # genai.configure(api_key=api_key)
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     response = client.models.generate_content(
-        model="gemini-1.5-flash", contents=prompt)
+        model="gemini-2.0-flash", contents=prompt)
     # response = model.generate_content(prompt)
 
     return {"insight": (response.text or "").strip(), "media_bpm": media_bpm, "pico_bpm": pico_bpm}
