@@ -5,7 +5,8 @@ from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import google.generativeai as genai
+# import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -121,14 +122,18 @@ def dashboard_paciente(request: Request, cpf: str | None = None):
                 (cpf,),
             ).fetchone()
         else:
-            paciente = conn.execute("SELECT id, nome, identificador FROM users WHERE tipo='paciente' ORDER BY id LIMIT 1").fetchone()
+            paciente = conn.execute(
+                "SELECT id, nome, identificador FROM users WHERE tipo='paciente' ORDER BY id LIMIT 1").fetchone()
 
         if not paciente:
-            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+            raise HTTPException(
+                status_code=404, detail="Paciente não encontrado")
 
-        token_row = conn.execute("SELECT pulsoid_token FROM tokens WHERE user_id=? LIMIT 1", (paciente["id"],)).fetchone()
+        token_row = conn.execute(
+            "SELECT pulsoid_token FROM tokens WHERE user_id=? LIMIT 1", (paciente["id"],)).fetchone()
 
-    pulsoid_token = (token_row["pulsoid_token"] if token_row else None) or os.getenv("PULSOID_TOKEN", "TOKEN_DO_PACIENTE")
+    pulsoid_token = (token_row["pulsoid_token"] if token_row else None) or os.getenv(
+        "PULSOID_TOKEN", "TOKEN_DO_PACIENTE")
     return TEMPLATES.TemplateResponse(
         request=request,
         name="dashboard_paciente.html",
@@ -144,7 +149,8 @@ def gemini_analyze(paciente_id: int):
             (paciente_id,),
         ).fetchone()
         if not paciente:
-            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+            raise HTTPException(
+                status_code=404, detail="Paciente não encontrado")
 
         start = (datetime.utcnow() - timedelta(days=7)).isoformat()
         stats = conn.execute(
@@ -171,8 +177,10 @@ def gemini_analyze(paciente_id: int):
     if not api_key:
         return {"insight": "GEMINI_API_KEY não configurada no .env.", "media_bpm": media_bpm, "pico_bpm": pico_bpm}
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(prompt)
+    # genai.configure(api_key=api_key)
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    response = client.models.generate_content(
+        model="gemini-1.5-flash", contents=prompt)
+    # response = model.generate_content(prompt)
 
     return {"insight": (response.text or "").strip(), "media_bpm": media_bpm, "pico_bpm": pico_bpm}

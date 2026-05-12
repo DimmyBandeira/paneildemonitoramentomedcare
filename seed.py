@@ -1,65 +1,84 @@
-import random
 import sqlite3
-from contextlib import closing
-from datetime import datetime, timedelta
-from pathlib import Path
+import datetime
+import random
 
-DB_PATH = Path(__file__).resolve().parent / "vitals.db"
+DB_NAME = "vitals.db"
+conn = sqlite3.connect(DB_NAME)
+cursor = conn.cursor()
 
+print("⏳ Limpando banco de dados antigo...")
+cursor.execute("DROP TABLE IF EXISTS vitals_history")
+cursor.execute("DROP TABLE IF EXISTS tokens")
+cursor.execute("DROP TABLE IF EXISTS users")
 
-def seed() -> None:
-    with closing(sqlite3.connect(DB_PATH)) as conn:
-        cur = conn.cursor()
+print("🏗️ Criando tabelas...")
+cursor.execute('''
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT,
+    identificador TEXT,
+    tipo TEXT,
+    doctor_id INTEGER,
+    email TEXT,
+    senha_hash TEXT,
+    idade INTEGER
+)
+''')
 
-        cur.execute("DELETE FROM vitals_history")
-        cur.execute("DELETE FROM tokens")
-        cur.execute("DELETE FROM users")
-        cur.execute("DELETE FROM sqlite_sequence WHERE name IN ('users', 'tokens', 'vitals_history')")
+cursor.execute('''
+CREATE TABLE tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    pulsoid_token TEXT
+)
+''')
 
-        cur.execute(
-            "INSERT INTO users (nome, tipo, email, senha_hash, identificador, idade) VALUES (?, 'medico', ?, ?, ?, ?)",
-            ("Dra. Marina Cardoso", "marina@medcare.local", "hash-demo", "CRM/SP123456", 45),
-        )
-        medico_id = cur.lastrowid
+cursor.execute('''
+CREATE TABLE vitals_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    paciente_id INTEGER,
+    bpm INTEGER,
+    timestamp DATETIME
+)
+''')
 
-        cur.execute(
-            "INSERT INTO users (nome, tipo, doctor_id, email, senha_hash, identificador, idade) VALUES (?, 'paciente', ?, ?, ?, ?, ?)",
-            ("João Estável", medico_id, "joao@paciente.local", "hash-demo", "11111111111", 38),
-        )
-        paciente1_id = cur.lastrowid
+print("👨‍⚕️ Inserindo cadastros demo com idades...")
+# 1. Médico
+cursor.execute(
+    "INSERT INTO users (nome, identificador, tipo, idade) VALUES ('Dr. Resolve', 'CRM/SP123456', 'medico', 45)")
+medico_id = cursor.lastrowid
 
-        cur.execute(
-            "INSERT INTO users (nome, tipo, doctor_id, email, senha_hash, identificador, idade) VALUES (?, 'paciente', ?, ?, ?, ?, ?)",
-            ("Carlos Pico", medico_id, "carlos@paciente.local", "hash-demo", "22222222222", 52),
-        )
-        paciente2_id = cur.lastrowid
+# 2. Paciente 1 (Saudável, 35 anos)
+cursor.execute(
+    f"INSERT INTO users (nome, identificador, tipo, doctor_id, idade) VALUES ('João Silva', '10349150702', 'paciente', {medico_id}, 35)")
+paciente1_id = cursor.lastrowid
 
-        cur.execute("INSERT INTO tokens (user_id, pulsoid_token) VALUES (?, ?)", (paciente1_id, "TOKEN_PULSOID_P1"))
-        cur.execute("INSERT INTO tokens (user_id, pulsoid_token) VALUES (?, ?)", (paciente2_id, "TOKEN_PULSOID_P2"))
+# 3. Paciente 2 (Com arritmia, 62 anos)
+cursor.execute(
+    f"INSERT INTO users (nome, identificador, tipo, doctor_id, idade) VALUES ('Maria Oliveira', '22222222222', 'paciente', {medico_id}, 62)")
+paciente2_id = cursor.lastrowid
 
-        now = datetime.utcnow()
-        for day in range(7):
-            for slot in range(8):
-                base_time = now - timedelta(days=day, hours=slot * 3)
+print("🫀 Gerando histórico de batimentos simulados...")
+agora = datetime.datetime.now()
 
-                bpm1 = random.randint(70, 75)
-                cur.execute(
-                    "INSERT INTO vitals_history (paciente_id, bpm, timestamp) VALUES (?, ?, ?)",
-                    (paciente1_id, bpm1, base_time.isoformat()),
-                )
+# Histórico Paciente 1 (Média 70-75 BPM)
+for i in range(50):
+    tempo = agora - datetime.timedelta(minutes=i*15)
+    bpm = random.randint(70, 75)
+    cursor.execute(
+        "INSERT INTO vitals_history (paciente_id, bpm, timestamp) VALUES (?, ?, ?)", (paciente1_id, bpm, tempo))
 
-                if slot in (0, 1) and day % 2 == 0:
-                    bpm2 = random.randint(132, 140)
-                else:
-                    bpm2 = random.randint(80, 92)
-                cur.execute(
-                    "INSERT INTO vitals_history (paciente_id, bpm, timestamp) VALUES (?, ?, ?)",
-                    (paciente2_id, bpm2, base_time.isoformat()),
-                )
+# Histórico Paciente 2 (Média 80-85 BPM, picos de 135)
+for i in range(50):
+    tempo = agora - datetime.timedelta(minutes=i*15)
+    if 10 < i < 15:
+        bpm = random.randint(130, 140)
+    else:
+        bpm = random.randint(80, 85)
+    cursor.execute(
+        "INSERT INTO vitals_history (paciente_id, bpm, timestamp) VALUES (?, ?, ?)", (paciente2_id, bpm, tempo))
 
-        conn.commit()
+conn.commit()
+conn.close()
 
-
-if __name__ == "__main__":
-    seed()
-    print("Seed concluído com sucesso.")
+print("✅ SUCESSO! Banco de dados atualizado. Pronto para a demo!")
