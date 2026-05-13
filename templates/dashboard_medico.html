@@ -5,32 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Painel Médico</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    @media print {
-      @page { size: A4; margin: 12mm; }
-      body { background: #fff !important; padding: 0 !important; }
-      body * { visibility: hidden !important; }
-      #modal, #report-sheet, #report-sheet * { visibility: visible !important; }
-      #modal {
-        position: static !important;
-        display: block !important;
-        background: #fff !important;
-        padding: 0 !important;
-        overflow: visible !important;
-      }
-      #report-sheet {
-        position: static !important;
-        display: block !important;
-        width: 100% !important;
-        max-width: none !important;
-        min-height: auto !important;
-        box-shadow: none !important;
-        border-radius: 0 !important;
-        padding: 0 !important;
-      }
-      .print-hidden { display: none !important; }
-    }
-  </style>
 </head>
 <body class="min-h-screen bg-[#0f172a] text-slate-100 p-6">
   <header class="mb-6 flex items-center justify-between">
@@ -44,7 +18,7 @@
         <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-1 text-[10px] font-medium text-emerald-300" data-field="status_badge">🟢 Sinal Forte</span>
         <span class="inline-flex items-center gap-1 rounded-full bg-cyan-500/15 px-2 py-1 text-[10px] font-medium text-cyan-300">{{ p['data_source'] or 'demo' }}</span>
       </div>
-      <h2 class="mt-2 text-lg font-medium">{{ p['nome'] }}</h2>
+      <h2 class="mt-2 text-lg font-medium" data-field="patient_name">{{ p['nome'] }}</h2>
       <p class="text-slate-400 text-xs">ID: {{ p['identificador'] }} • {{ p['idade'] }} anos</p>
       <p class="mt-2 line-clamp-2 text-xs text-slate-400">{{ p['scenario'] }}</p>
 
@@ -91,15 +65,30 @@
     <div id="report-sheet" class="mx-auto w-full max-w-[794px] min-h-[1123px] rounded-xl bg-white text-slate-900 p-6 md:p-10 shadow-2xl">
       <div class="flex items-start justify-between border-b border-slate-200 pb-4">
         <div>
-          <h3 class="text-2xl font-semibold">Relatório Cardiológico (IA)</h3>
-          <p class="text-sm text-slate-500">Fonte: Monitor Cardiago • Assistente Gemini</p>
+          <p class="text-xs uppercase tracking-[0.25em] text-slate-500">Medcare Monitor</p>
+          <h3 class="mt-1 text-2xl font-semibold">Relatório Cardiológico Assistido</h3>
+          <p class="text-sm text-slate-500">Documento de apoio clínico gerado a partir de telemetria cardíaca.</p>
         </div>
-        <button class="print-hidden rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-100" onclick="closeModal()">✕</button>
+        <button class="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-100" onclick="closeModal()">✕</button>
       </div>
-      <p id="report-generated-at" class="mt-3 text-xs text-slate-500"></p>
-      <div id="modal-content" class="mt-5 whitespace-pre-wrap text-sm leading-relaxed text-slate-800"></div>
-      <p class="mt-8 border-t border-slate-200 pt-4 text-xs text-slate-500">Relatório de apoio, não substitui avaliação médica.</p>
-      <div class="print-hidden mt-6 flex justify-end gap-3">
+      <div class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+        <div><span class="font-semibold text-slate-900">Origem:</span> Monitor Cardiago / IA</div>
+        <div><span class="font-semibold text-slate-900">Tipo:</span> Relatório preliminar</div>
+        <div id="report-generated-at"></div>
+        <div><span class="font-semibold text-slate-900">Status:</span> Não substitui avaliação médica</div>
+      </div>
+      <div class="mt-6">
+        <h4 class="border-b border-slate-200 pb-2 text-sm font-semibold uppercase tracking-wider text-slate-700">Resultado da análise</h4>
+        <div id="modal-content" class="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-800"></div>
+      </div>
+      <div class="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">
+        Este relatório é informativo, baseado em dados de monitoramento, e não substitui consulta médica, diagnóstico ou conduta clínica presencial.
+      </div>
+      <div class="mt-10 grid grid-cols-2 gap-8 text-xs text-slate-500">
+        <div class="border-t border-slate-300 pt-2">Responsável técnico / Médico</div>
+        <div class="border-t border-slate-300 pt-2">Data e assinatura</div>
+      </div>
+      <div class="mt-6 flex justify-end gap-3">
         <button class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100" onclick="closeModal()">Fechar</button>
         <button class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700" onclick="printReport()">Imprimir / Salvar PDF</button>
       </div>
@@ -124,9 +113,47 @@
       return Math.max(1, Math.round((avg * samples) / 120));
     }
 
+    function setText(card, field, value) {
+      const el = card.querySelector(`[data-field="${field}"]`);
+      if (el) el.textContent = value;
+    }
+
+    function applyPatientToCard(patient) {
+      const card = document.querySelector(`[data-paciente-id="${patient.id}"]`);
+      if (!card) return;
+      const bpm = patient.bpm_atual ?? '--';
+      setText(card, 'bpm_atual', bpm);
+      setText(card, 'media_bpm', patient.media_bpm ?? '--');
+      setText(card, 'pico_bpm', patient.pico_bpm ?? '--');
+      setText(card, 'total_historico', patient.total_historico ?? 0);
+      setText(card, 'estimated_kcal', estimateKcal(patient));
+      setText(card, 'ultimo_evento', formatDateTime(patient.ultimo_evento));
+      setText(card, 'status_badge', bpm === '--' ? '🟡 Sem leitura recente' : '🟢 Sinal Forte');
+      setText(card, 'connection_status', bpm === '--' ? 'Aguardando' : 'Conectado');
+    }
+
+    function applyLiveMirror() {
+      const lastRaw = localStorage.getItem('medcare_last_live_bpm');
+      if (!lastRaw) return;
+      try {
+        const live = JSON.parse(lastRaw);
+        if (!live?.patientId || !live?.bpm) return;
+        const ageMs = Date.now() - new Date(live.timestamp).getTime();
+        if (Number.isNaN(ageMs) || ageMs > 60000) return;
+        const card = document.querySelector(`[data-paciente-id="${live.patientId}"]`);
+        if (!card) return;
+        setText(card, 'bpm_atual', live.bpm);
+        setText(card, 'ultimo_evento', `${Math.max(1, Math.round(ageMs / 1000))}s atrás`);
+        setText(card, 'status_badge', '🟢 Pulsoid ao vivo');
+        setText(card, 'connection_status', 'Ao vivo');
+      } catch (error) {
+        console.warn('Falha ao ler espelho local do Pulsoid', error);
+      }
+    }
+
     function openModal(content) {
       modalContent.textContent = content;
-      document.getElementById('report-generated-at').textContent = `Gerado em: ${new Date().toLocaleString('pt-BR')}`;
+      document.getElementById('report-generated-at').innerHTML = `<span class="font-semibold text-slate-900">Gerado em:</span> ${new Date().toLocaleString('pt-BR')}`;
       modal.classList.remove('hidden');
     }
 
@@ -134,8 +161,71 @@
       modal.classList.add('hidden');
     }
 
+    function buildPrintableReportHtml() {
+      const content = modalContent.textContent || '';
+      const generatedAt = new Date().toLocaleString('pt-BR');
+      return `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Relatório Cardiológico</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; color: #111827; font-family: Arial, sans-serif; }
+    .sheet { width: 100%; min-height: 100vh; }
+    .topline { font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: #64748b; }
+    h1 { margin: 6px 0 4px; font-size: 24px; color: #0f172a; }
+    .subtitle { margin: 0; color: #475569; font-size: 13px; }
+    .header { border-bottom: 2px solid #e2e8f0; padding-bottom: 16px; margin-bottom: 16px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; font-size: 12px; color: #475569; margin-bottom: 22px; }
+    .section-title { font-size: 12px; letter-spacing: 1.4px; text-transform: uppercase; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 14px; font-weight: 700; }
+    .content { white-space: pre-wrap; line-height: 1.65; font-size: 13px; color: #1f2937; }
+    .warning { margin-top: 24px; border: 1px solid #fde68a; background: #fffbeb; color: #92400e; border-radius: 10px; padding: 12px; font-size: 12px; line-height: 1.5; }
+    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 52px; font-size: 11px; color: #64748b; }
+    .signature { border-top: 1px solid #94a3b8; padding-top: 8px; }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <section class="header">
+      <div class="topline">Medcare Monitor</div>
+      <h1>Relatório Cardiológico Assistido</h1>
+      <p class="subtitle">Documento de apoio clínico gerado a partir de telemetria cardíaca.</p>
+    </section>
+    <section class="meta">
+      <div><strong>Origem:</strong> Monitor Cardiago / IA</div>
+      <div><strong>Tipo:</strong> Relatório preliminar</div>
+      <div><strong>Gerado em:</strong> ${generatedAt}</div>
+      <div><strong>Status:</strong> Não substitui avaliação médica</div>
+    </section>
+    <section>
+      <div class="section-title">Resultado da análise</div>
+      <div class="content"></div>
+    </section>
+    <section class="warning">Este relatório é informativo, baseado em dados de monitoramento, e não substitui consulta médica, diagnóstico ou conduta clínica presencial.</section>
+    <section class="signatures">
+      <div class="signature">Responsável técnico / Médico</div>
+      <div class="signature">Data e assinatura</div>
+    </section>
+  </main>
+  <script>
+    document.querySelector('.content').textContent = ${JSON.stringify(content)};
+    window.onload = () => { window.print(); };
+  </script>
+</body>
+</html>`;
+    }
+
     function printReport() {
-      window.print();
+      const printWindow = window.open('', '_blank', 'width=900,height=1100');
+      if (!printWindow) {
+        alert('Permita pop-ups para imprimir o relatório.');
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(buildPrintableReportHtml());
+      printWindow.document.close();
     }
 
     modal.addEventListener('click', () => closeModal());
@@ -160,28 +250,17 @@
         const response = await fetch('/api/patients/summary');
         if (!response.ok) throw new Error('status not ok');
         const data = await response.json();
-        (data.patients || []).forEach((patient) => {
-          const card = document.querySelector(`[data-paciente-id="${patient.id}"]`);
-          if (!card) return;
-          const bpm = patient.bpm_atual ?? '--';
-          card.querySelector('[data-field="bpm_atual"]').textContent = bpm;
-          card.querySelector('[data-field="media_bpm"]').textContent = patient.media_bpm ?? '--';
-          card.querySelector('[data-field="pico_bpm"]').textContent = patient.pico_bpm ?? '--';
-          card.querySelector('[data-field="total_historico"]').textContent = patient.total_historico ?? 0;
-          card.querySelector('[data-field="estimated_kcal"]').textContent = estimateKcal(patient);
-          card.querySelector('[data-field="ultimo_evento"]').textContent = formatDateTime(patient.ultimo_evento);
-          const statusBadge = card.querySelector('[data-field="status_badge"]');
-          const connectionStatus = card.querySelector('[data-field="connection_status"]');
-          statusBadge.textContent = bpm === '--' ? '🟡 Sem leitura recente' : '🟢 Sinal Forte';
-          connectionStatus.textContent = bpm === '--' ? 'Aguardando' : 'Conectado';
-        });
+        (data.patients || []).forEach(applyPatientToCard);
       } catch (error) {
         console.warn('Falha ao atualizar cards de pacientes', error);
+      } finally {
+        applyLiveMirror();
       }
     }
 
     refreshPatientCards();
-    setInterval(refreshPatientCards, 5000);
+    setInterval(refreshPatientCards, 3000);
+    setInterval(applyLiveMirror, 1000);
   </script>
 </body>
 </html>
