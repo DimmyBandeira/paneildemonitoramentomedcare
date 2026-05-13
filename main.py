@@ -22,48 +22,18 @@ load_dotenv()
 
 app = FastAPI(title="Monitor Cardiago - Monolito Modular MVP")
 
-REAL_PATIENT_IDENTIFIER = os.getenv("DIMMY_CPF", "12345678901")
+REAL_PATIENT_IDENTIFIER = os.getenv("DIMMY_CPF", "").strip()
 REAL_PATIENT_NAME = "Dimmy Bandeira"
 REAL_PATIENT_AGE = 40
 REAL_PATIENT_SOURCE = "pulsoid_real"
 DEMO_PATIENT_SOURCE = "demo"
 
 DEMO_PATIENTS: list[dict[str, Any]] = [
-    {
-        "nome": "Marina Costa",
-        "identificador": "90000000001",
-        "idade": 34,
-        "scenario": "Pico de estresse no período da tarde",
-        "history": [72, 76, 88, 94, 102, 97, 84],
-    },
-    {
-        "nome": "Roberto Lima",
-        "identificador": "90000000002",
-        "idade": 58,
-        "scenario": "Repouso elevado e baixa recuperação noturna",
-        "history": [83, 86, 91, 96, 99, 101, 95],
-    },
-    {
-        "nome": "Aline Barros",
-        "identificador": "90000000003",
-        "idade": 29,
-        "scenario": "Oscilação leve após atividade física",
-        "history": [68, 70, 74, 89, 92, 81, 73],
-    },
-    {
-        "nome": "Carlos Menezes",
-        "identificador": "90000000004",
-        "idade": 46,
-        "scenario": "Sinal estável em observação preventiva",
-        "history": [64, 66, 67, 69, 68, 70, 67],
-    },
-    {
-        "nome": "Patrícia Souza",
-        "identificador": "90000000005",
-        "idade": 41,
-        "scenario": "Alerta simulado de pico persistente",
-        "history": [92, 96, 104, 111, 116, 108, 101],
-    },
+    {"nome": "Marina Costa", "identificador": "DEMO-001", "idade": 34, "scenario": "Pico de estresse no período da tarde", "history": [72, 76, 88, 94, 102, 97, 84]},
+    {"nome": "Roberto Lima", "identificador": "DEMO-002", "idade": 58, "scenario": "Repouso elevado e baixa recuperação noturna", "history": [83, 86, 91, 96, 99, 101, 95]},
+    {"nome": "Aline Barros", "identificador": "DEMO-003", "idade": 29, "scenario": "Oscilação leve após atividade física", "history": [68, 70, 74, 89, 92, 81, 73]},
+    {"nome": "Carlos Menezes", "identificador": "DEMO-004", "idade": 46, "scenario": "Sinal estável em observação preventiva", "history": [64, 66, 67, 69, 68, 70, 67]},
+    {"nome": "Patrícia Souza", "identificador": "DEMO-005", "idade": 41, "scenario": "Alerta simulado de pico persistente", "history": [92, 96, 104, 111, 116, 108, 101]},
 ]
 
 
@@ -72,15 +42,20 @@ class VitalPayload(BaseModel):
     source: str = Field(default=REAL_PATIENT_SOURCE, max_length=40)
 
 
-class VitalPayload(BaseModel):
-    bpm: int = Field(..., ge=25, le=240)
-    source: str = Field(default="pulsoid_real", max_length=40)
-
-
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in rows)
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    if not _column_exists(conn, table, column):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 def _is_recent_timestamp(raw_value: str | None, max_age_seconds: int = 30) -> bool:
@@ -92,6 +67,78 @@ def _is_recent_timestamp(raw_value: str | None, max_age_seconds: int = 30) -> bo
         return False
     age = datetime.utcnow() - timestamp
     return timedelta(seconds=0) <= age <= timedelta(seconds=max_age_seconds)
+
+
+def _upsert_patient(conn: sqlite3.Connection, *, nome: str, identificador: str, idade: int, source: str, scenario: str) -> int:
+    row = conn.execute("SELECT id FROM users WHERE identificador=? LIMIT 1", (identificador,)).fetchone()
+    if not row and nome == REAL_PATIENT_NAME:
+        row = conn.execute("SELECT id FROM users WHERE nome=? LIMIT 1", (nome,)).fetchone()
+
+    if row:
+        conn.execute(
+            """
+            UPDATE users
+               SET nome=?, tipo='paciente', identificador=?, idade=?, data_source=?, scenario=?
+             WHERE id=?
+            """,
+            (nome, identificador, idade, source, scenario, row["id"]),
+        )
+        return int(row["id"])
+
+    cur = conn.execute(
+        """
+        INSERT INTO users (nome, tipo, identificador, idade, data_source, scenario)
+        VALUES (?, 'paciente', ?, ?, ?, ?)
+        """,
+        (nome, identificador, idade, source, scenario),
+    )
+    return int(cur.lastrowid)
+
+
+def _seed_demo_history(conn: sqlite3.Connection, paciente_id: int, history: list[int]) -> None:
+    existing = conn.execute("SELECT COUNT(*) AS total FROM vitals_history WHERE paciente_id=?", (paciente_id,)).fetchone()
+    if existing and int(existing["total"] or 0) > 0:
+        return
+    base_time = datetime.utcnow() - timedelta(hours=len(history))
+    for index, bpm in enumerate(history):
+        timestamp = (base_time + timedelta(hours=index)).isoformat()
+        conn.execute("INSERT INTO vitals_history (paciente_id, bpm, timestamp) VALUES (?, ?, ?)", (paciente_id, bpm, timestamp))
+
+
+def seed_initial_data() -> None:
+    with closing(get_conn()) as conn:
+        if REAL_PATIENT_IDENTIFIER:
+            wrong_owner = conn.execute(
+                "SELECT id FROM users WHERE identificador=? AND nome<>? LIMIT 1",
+                (REAL_PATIENT_IDENTIFIER, REAL_PATIENT_NAME),
+            ).fetchone()
+            if wrong_owner:
+                conn.execute("UPDATE users SET identificador=? WHERE id=?", (f"LEGACY-{wrong_owner['id']}", wrong_owner["id"]))
+
+            dimmy_id = _upsert_patient(
+                conn,
+                nome=REAL_PATIENT_NAME,
+                identificador=REAL_PATIENT_IDENTIFIER,
+                idade=REAL_PATIENT_AGE,
+                source=REAL_PATIENT_SOURCE,
+                scenario="Histórico real coletado do Pulsoid",
+            )
+            pulsoid_token = os.getenv("PULSOID_TOKEN")
+            if pulsoid_token:
+                conn.execute("DELETE FROM tokens WHERE user_id=?", (dimmy_id,))
+                conn.execute("INSERT INTO tokens (user_id, pulsoid_token) VALUES (?, ?)", (dimmy_id, pulsoid_token))
+
+        for demo in DEMO_PATIENTS:
+            paciente_id = _upsert_patient(
+                conn,
+                nome=str(demo["nome"]),
+                identificador=str(demo["identificador"]),
+                idade=int(demo["idade"]),
+                source=DEMO_PATIENT_SOURCE,
+                scenario=str(demo["scenario"]),
+            )
+            _seed_demo_history(conn, paciente_id, [int(value) for value in demo["history"]])
+        conn.commit()
 
 
 def init_db() -> None:
@@ -135,9 +182,7 @@ def init_db() -> None:
         )
         _ensure_column(conn, "users", "data_source", "TEXT DEFAULT 'demo'")
         _ensure_column(conn, "users", "scenario", "TEXT DEFAULT ''")
-        _ensure_column(conn, "vitals_history", "source", "TEXT DEFAULT 'demo'")
         conn.commit()
-
     seed_initial_data()
 
 
@@ -155,13 +200,11 @@ def login_page(request: Request):
 async def auth_route(request: Request):
     payload = await request.json()
     credential = str(payload.get("credential", "")).strip().upper()
-
     if re.fullmatch(r"CRM\/[A-Z]{2}\d{6}", credential):
         return {"redirect_url": "/dashboard/medico"}
     if re.fullmatch(r"\d{11}", credential):
         return {"redirect_url": f"/dashboard/paciente?cpf={credential}"}
-
-    return JSONResponse(status_code=400, content={"error": "Formato inválido. Use CRM/SP123456 ou CPF com 11 dígitos."})
+    return JSONResponse(status_code=400, content={"error": "Formato inválido. Use CRM/SP123456 ou documento com 11 dígitos."})
 
 
 def fetch_patients_summary(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -180,35 +223,14 @@ def fetch_patients_summary(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         ORDER BY CASE WHEN p.data_source='pulsoid_real' THEN 0 ELSE 1 END, p.id
         """
     ).fetchall()
-
-    patients: list[dict[str, Any]] = []
-    for row in rows:
-        patients.append({
-            'id': row['id'],
-            'nome': row['nome'],
-            'identificador': row['identificador'],
-            'idade': row['idade'],
-            'data_source': row['data_source'],
-            'scenario': row['scenario'],
-            'bpm_atual': row['bpm_atual'],
-            'ultimo_evento': row['ultimo_evento'],
-            'media_bpm': row['media_bpm'],
-            'pico_bpm': row['pico_bpm'],
-            'total_historico': row['total_historico'] or 0,
-        })
-    return patients
+    return [dict(row) | {"total_historico": row["total_historico"] or 0} for row in rows]
 
 
 @app.get("/dashboard/medico")
 def dashboard_medico(request: Request):
     with closing(get_conn()) as conn:
         pacientes = fetch_patients_summary(conn)
-
-    return TEMPLATES.TemplateResponse(
-        request=request,
-        name="dashboard_medico.html",
-        context={"pacientes": pacientes},
-    )
+    return TEMPLATES.TemplateResponse(request=request, name="dashboard_medico.html", context={"pacientes": pacientes})
 
 
 @app.get("/api/patients/summary")
@@ -234,15 +256,10 @@ def get_latest_vitals() -> dict[str, dict[str, dict[str, Any]]]:
              AND latest.max_timestamp = vh.timestamp
             """
         ).fetchall()
-
     patients: dict[str, dict[str, Any]] = {}
     for row in rows:
         timestamp = row["timestamp"]
-        patients[str(row["paciente_id"])] = {
-            "bpm": row["bpm"],
-            "timestamp": timestamp,
-            "is_recent": _is_recent_timestamp(timestamp),
-        }
+        patients[str(row["paciente_id"])] = {"bpm": row["bpm"], "timestamp": timestamp, "is_recent": _is_recent_timestamp(timestamp)}
     return {"patients": patients}
 
 
@@ -264,59 +281,34 @@ def dashboard_paciente(request: Request, cpf: str | None = None):
                 """
                 SELECT id, nome, identificador, idade, data_source
                 FROM users
-                WHERE tipo='paciente' AND data_source=?
-                ORDER BY id LIMIT 1
-                """,
-                (REAL_PATIENT_SOURCE,),
+                WHERE tipo='paciente'
+                ORDER BY CASE WHEN data_source='pulsoid_real' THEN 0 ELSE 1 END, id
+                LIMIT 1
+                """
             ).fetchone()
-
         if not paciente:
             raise HTTPException(status_code=404, detail="Paciente não encontrado")
-
-        token_row = conn.execute(
-            "SELECT pulsoid_token FROM tokens WHERE user_id=? LIMIT 1",
-            (paciente["id"],),
-        ).fetchone()
-
+        token_row = conn.execute("SELECT pulsoid_token FROM tokens WHERE user_id=? LIMIT 1", (paciente["id"],)).fetchone()
     pulsoid_token = (token_row["pulsoid_token"] if token_row else None) or os.getenv("PULSOID_TOKEN", "")
-    return TEMPLATES.TemplateResponse(
-        request=request,
-        name="dashboard_paciente.html",
-        context={"paciente": paciente, "pulsoid_token": pulsoid_token},
-    )
+    return TEMPLATES.TemplateResponse(request=request, name="dashboard_paciente.html", context={"paciente": paciente, "pulsoid_token": pulsoid_token})
 
 
 @app.post("/api/vitals/{paciente_id}")
 def save_vital(paciente_id: int, payload: VitalPayload) -> dict[str, Any]:
     with closing(get_conn()) as conn:
-        paciente = conn.execute(
-            "SELECT id FROM users WHERE id=? AND tipo='paciente' LIMIT 1",
-            (paciente_id,),
-        ).fetchone()
+        paciente = conn.execute("SELECT id FROM users WHERE id=? AND tipo='paciente' LIMIT 1", (paciente_id,)).fetchone()
         if not paciente:
             raise HTTPException(status_code=404, detail="Paciente não encontrado")
-
         timestamp = datetime.utcnow().isoformat()
-        conn.execute(
-            """
-            INSERT INTO vitals_history (paciente_id, bpm, timestamp)
-            VALUES (?, ?, ?)
-            """,
-            (paciente_id, payload.bpm, timestamp),
-        )
+        conn.execute("INSERT INTO vitals_history (paciente_id, bpm, timestamp) VALUES (?, ?, ?)", (paciente_id, payload.bpm, timestamp))
         conn.commit()
-
     return {"ok": True, "paciente_id": paciente_id, "bpm": payload.bpm, "timestamp": timestamp}
 
 
 def _build_local_insight(nome: str, idade: int, media_bpm: float, pico_bpm: int, total: int) -> str:
     if total <= 0:
         tendencia = "Dados insuficientes na última semana para tendência robusta."
-        insights = (
-            "- Priorizar coleta contínua por pelo menos 7 dias para maior confiabilidade.\n"
-            "- Registrar horários de sono, cafeína e estresse para correlacionar com o BPM.\n"
-            "- Revisar aderência ao sensor para reduzir lacunas de telemetria."
-        )
+        insights = "- Priorizar coleta contínua por pelo menos 7 dias para maior confiabilidade.\n- Registrar horários de sono, cafeína e estresse para correlacionar com o BPM.\n- Revisar aderência ao sensor para reduzir lacunas de telemetria."
     else:
         if media_bpm >= 100 or pico_bpm >= 130:
             tendencia = "Tendência de frequência elevada com picos relevantes."
@@ -324,144 +316,42 @@ def _build_local_insight(nome: str, idade: int, media_bpm: float, pico_bpm: int,
             tendencia = "Tendência de frequência reduzida, exigindo contexto clínico."
         else:
             tendencia = "Tendência estável na maior parte das amostras disponíveis."
-        insights = (
-            "- Manter rotina regular de sono e hidratação para reduzir variabilidade.\n"
-            "- Monitorar gatilhos (estresse, exercício, cafeína) próximos aos picos.\n"
-            "- Se picos/sintomas persistirem, considerar avaliação médica direcionada."
-        )
-
-    return (
-        f"Paciente: {nome} ({idade} anos).\n"
-        f"Amostras (7 dias): {total}. Média: {media_bpm} BPM. Pico: {pico_bpm} BPM.\n\n"
-        f"1) Tendência objetiva\n{tendencia}\n\n"
-        f"2) Insights acionáveis\n{insights}\n\n"
-        "3) Sinais de alerta para investigação\n"
-        "- Dor torácica, dispneia, síncope, palpitações persistentes ou piora funcional.\n"
-        "- Picos repetidos em repouso ou taquicardia associada a sintomas.\n\n"
-        "4) Este relatório é de apoio e não substitui avaliação médica presencial."
-    )
+        insights = "- Manter rotina regular de sono e hidratação para reduzir variabilidade.\n- Monitorar gatilhos próximos aos picos.\n- Se picos/sintomas persistirem, considerar avaliação médica direcionada."
+    return f"Paciente: {nome} ({idade} anos).\nAmostras (7 dias): {total}. Média: {media_bpm} BPM. Pico: {pico_bpm} BPM.\n\n1) Tendência objetiva\n{tendencia}\n\n2) Insights acionáveis\n{insights}\n\n3) Sinais de alerta para investigação\n- Dor torácica, dispneia, síncope, palpitações persistentes ou piora funcional.\n- Picos repetidos em repouso ou taquicardia associada a sintomas.\n\n4) Este relatório é de apoio e não substitui avaliação médica presencial."
 
 
 def _build_ai_unavailable_insight(fallback: str) -> str:
-    return (
-        "A análise automática por IA não está disponível neste momento. "
-        "O relatório abaixo foi gerado pelo motor local de apoio clínico com base nos dados coletados.\n\n"
-        f"{fallback}"
-    )
+    return "A análise automática por IA não está disponível neste momento. O relatório abaixo foi gerado pelo motor local de apoio clínico com base nos dados coletados.\n\n" f"{fallback}"
 
 
 @app.post("/api/gemini/analyze/{paciente_id}")
 def gemini_analyze(paciente_id: int) -> dict[str, Any]:
     with closing(get_conn()) as conn:
-        paciente = conn.execute(
-            "SELECT id, nome, idade, data_source FROM users WHERE id=? AND tipo='paciente'",
-            (paciente_id,),
-        ).fetchone()
+        paciente = conn.execute("SELECT id, nome, idade, data_source FROM users WHERE id=? AND tipo='paciente'", (paciente_id,)).fetchone()
         if not paciente:
             raise HTTPException(status_code=404, detail="Paciente não encontrado")
-
         start = (datetime.utcnow() - timedelta(days=7)).isoformat()
-        stats = conn.execute(
-            """
-            SELECT ROUND(AVG(bpm), 1) AS media_bpm,
-                   MAX(bpm) AS pico_bpm,
-                   COUNT(*) AS total
-            FROM vitals_history
-            WHERE paciente_id=? AND timestamp >= ?
-            """,
-            (paciente_id, start),
-        ).fetchone()
-        rows = conn.execute(
-            """
-            SELECT bpm, timestamp, source
-            FROM vitals_history
-            WHERE paciente_id=? AND timestamp >= ?
-            ORDER BY timestamp DESC
-            LIMIT 30
-            """,
-            (paciente_id, start),
-        ).fetchall()
-
-        rows = conn.execute(
-            """
-            SELECT bpm, timestamp, source
-            FROM vitals_history
-            WHERE paciente_id=? AND timestamp >= ?
-            ORDER BY timestamp DESC
-            LIMIT 30
-            """,
-            (paciente_id, start),
-        ).fetchall()
-
+        stats = conn.execute("SELECT ROUND(AVG(bpm), 1) AS media_bpm, MAX(bpm) AS pico_bpm, COUNT(*) AS total FROM vitals_history WHERE paciente_id=? AND timestamp >= ?", (paciente_id, start)).fetchone()
+        rows = conn.execute("SELECT bpm, timestamp FROM vitals_history WHERE paciente_id=? AND timestamp >= ? ORDER BY timestamp DESC LIMIT 30", (paciente_id, start)).fetchall()
     media_bpm = float(stats["media_bpm"] if stats and stats["media_bpm"] is not None else 0)
     pico_bpm = int(stats["pico_bpm"] if stats and stats["pico_bpm"] is not None else 0)
     total = int(stats["total"] if stats else 0)
-
-    history_text = ", ".join(
-        f"{row['bpm']} BPM em {row['timestamp']} ({row['source']})"
-        for row in rows
-    )
-
-    fallback = _build_local_insight(
-        str(paciente["nome"]),
-        int(paciente["idade"]),
-        media_bpm,
-        pico_bpm,
-        total,
-    )
-
-    fallback = _build_local_insight(paciente["nome"], int(paciente["idade"]), media_bpm, pico_bpm, total)
+    history_text = ", ".join(f"{row['bpm']} BPM em {row['timestamp']}" for row in rows)
+    fallback = _build_local_insight(str(paciente["nome"]), int(paciente["idade"]), media_bpm, pico_bpm, total)
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return {
-            "insight": _build_ai_unavailable_insight(fallback),
-            "media_bpm": media_bpm,
-            "pico_bpm": pico_bpm,
-            "source": "fallback_no_api_key",
-        }
-
+        return {"insight": _build_ai_unavailable_insight(fallback), "media_bpm": media_bpm, "pico_bpm": pico_bpm, "source": "fallback_no_api_key"}
     prompt = (
         "Você é um assistente cardiológico de apoio, sem emitir diagnóstico definitivo. "
-        f"Paciente: {paciente['nome']}. "
-        f"Idade: {paciente['idade']} anos. "
-        f"Fonte do paciente: {paciente['data_source']}. "
-        f"Nos últimos 7 dias, média de frequência cardíaca: {media_bpm} BPM, "
-        f"pico: {pico_bpm} BPM, amostras: {total}. "
-        f"Histórico recente: {history_text or 'sem amostras'}. "
-        "Forneça em português: "
-        "1) leitura objetiva de tendência; "
-        "2) três insights acionáveis; "
-        "3) sinais de alerta que justificam investigação; "
-        "4) ressalva de que não substitui avaliação médica. "
-        "Se os dados forem insuficientes, diga isso claramente."
+        f"Paciente: {paciente['nome']}. Idade: {paciente['idade']} anos. Fonte: {paciente['data_source']}. "
+        f"Média: {media_bpm} BPM, pico: {pico_bpm} BPM, amostras: {total}. Histórico: {history_text or 'sem amostras'}. "
+        "Forneça em português tendência, três insights acionáveis, sinais de alerta e ressalva médica."
     )
-
     try:
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
-            contents=prompt,
-        )
-
-        return {
-            "insight": (response.text or fallback).strip(),
-            "media_bpm": media_bpm,
-            "pico_bpm": pico_bpm,
-            "source": "gemini",
-        }
-
+        response = client.models.generate_content(model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"), contents=prompt)
+        return {"insight": (response.text or fallback).strip(), "media_bpm": media_bpm, "pico_bpm": pico_bpm, "source": "gemini"}
     except genai_errors.ClientError:
-        return {
-            "insight": _build_ai_unavailable_insight(fallback),
-            "media_bpm": media_bpm,
-            "pico_bpm": pico_bpm,
-            "source": "fallback_gemini_unavailable",
-        }
-
+        return {"insight": _build_ai_unavailable_insight(fallback), "media_bpm": media_bpm, "pico_bpm": pico_bpm, "source": "fallback_gemini_unavailable"}
     except Exception:
-        return {
-            "insight": _build_ai_unavailable_insight(fallback),
-            "media_bpm": media_bpm,
-            "pico_bpm": pico_bpm,
-            "source": "fallback_unexpected_error",
-        }
+        return {"insight": _build_ai_unavailable_insight(fallback), "media_bpm": media_bpm, "pico_bpm": pico_bpm, "source": "fallback_unexpected_error"}
