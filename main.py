@@ -22,6 +22,55 @@ load_dotenv()
 
 app = FastAPI(title="Monitor Cardiago - Monolito Modular MVP")
 
+REAL_PATIENT_IDENTIFIER = os.getenv("DIMMY_CPF", "12345678901")
+REAL_PATIENT_NAME = "Dimmy Bandeira"
+REAL_PATIENT_AGE = 40
+REAL_PATIENT_SOURCE = "pulsoid_real"
+DEMO_PATIENT_SOURCE = "demo"
+
+DEMO_PATIENTS: list[dict[str, Any]] = [
+    {
+        "nome": "Marina Costa",
+        "identificador": "90000000001",
+        "idade": 34,
+        "scenario": "Pico de estresse no período da tarde",
+        "history": [72, 76, 88, 94, 102, 97, 84],
+    },
+    {
+        "nome": "Roberto Lima",
+        "identificador": "90000000002",
+        "idade": 58,
+        "scenario": "Repouso elevado e baixa recuperação noturna",
+        "history": [83, 86, 91, 96, 99, 101, 95],
+    },
+    {
+        "nome": "Aline Barros",
+        "identificador": "90000000003",
+        "idade": 29,
+        "scenario": "Oscilação leve após atividade física",
+        "history": [68, 70, 74, 89, 92, 81, 73],
+    },
+    {
+        "nome": "Carlos Menezes",
+        "identificador": "90000000004",
+        "idade": 46,
+        "scenario": "Sinal estável em observação preventiva",
+        "history": [64, 66, 67, 69, 68, 70, 67],
+    },
+    {
+        "nome": "Patrícia Souza",
+        "identificador": "90000000005",
+        "idade": 41,
+        "scenario": "Alerta simulado de pico persistente",
+        "history": [92, 96, 104, 111, 116, 108, 101],
+    },
+]
+
+
+class VitalPayload(BaseModel):
+    bpm: int = Field(..., ge=25, le=240)
+    source: str = Field(default=REAL_PATIENT_SOURCE, max_length=40)
+
 
 class VitalPayload(BaseModel):
     bpm: int = Field(..., ge=25, le=240)
@@ -84,7 +133,12 @@ def init_db() -> None:
             )
             """
         )
+        _ensure_column(conn, "users", "data_source", "TEXT DEFAULT 'demo'")
+        _ensure_column(conn, "users", "scenario", "TEXT DEFAULT ''")
+        _ensure_column(conn, "vitals_history", "source", "TEXT DEFAULT 'demo'")
         conn.commit()
+
+    seed_initial_data()
 
 
 @app.on_event("startup")
@@ -197,22 +251,34 @@ def dashboard_paciente(request: Request, cpf: str | None = None):
     with closing(get_conn()) as conn:
         if cpf:
             paciente = conn.execute(
-                "SELECT id, nome, identificador FROM users WHERE tipo='paciente' AND identificador=? LIMIT 1",
+                """
+                SELECT id, nome, identificador, idade, data_source
+                FROM users
+                WHERE tipo='paciente' AND identificador=?
+                LIMIT 1
+                """,
                 (cpf,),
             ).fetchone()
         else:
             paciente = conn.execute(
-                "SELECT id, nome, identificador FROM users WHERE tipo='paciente' ORDER BY id LIMIT 1").fetchone()
+                """
+                SELECT id, nome, identificador, idade, data_source
+                FROM users
+                WHERE tipo='paciente' AND data_source=?
+                ORDER BY id LIMIT 1
+                """,
+                (REAL_PATIENT_SOURCE,),
+            ).fetchone()
 
         if not paciente:
-            raise HTTPException(
-                status_code=404, detail="Paciente não encontrado")
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
 
         token_row = conn.execute(
-            "SELECT pulsoid_token FROM tokens WHERE user_id=? LIMIT 1", (paciente["id"],)).fetchone()
+            "SELECT pulsoid_token FROM tokens WHERE user_id=? LIMIT 1",
+            (paciente["id"],),
+        ).fetchone()
 
-    pulsoid_token = (token_row["pulsoid_token"] if token_row else None) or os.getenv(
-        "PULSOID_TOKEN", "TOKEN_DO_PACIENTE")
+    pulsoid_token = (token_row["pulsoid_token"] if token_row else None) or os.getenv("PULSOID_TOKEN", "")
     return TEMPLATES.TemplateResponse(
         request=request,
         name="dashboard_paciente.html",
@@ -305,6 +371,16 @@ def gemini_analyze(paciente_id: int) -> dict[str, Any]:
             """,
             (paciente_id, start),
         ).fetchone()
+        rows = conn.execute(
+            """
+            SELECT bpm, timestamp, source
+            FROM vitals_history
+            WHERE paciente_id=? AND timestamp >= ?
+            ORDER BY timestamp DESC
+            LIMIT 30
+            """,
+            (paciente_id, start),
+        ).fetchall()
 
         rows = conn.execute(
             """
@@ -334,6 +410,7 @@ def gemini_analyze(paciente_id: int) -> dict[str, Any]:
         total,
     )
 
+    fallback = _build_local_insight(paciente["nome"], int(paciente["idade"]), media_bpm, pico_bpm, total)
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return {
