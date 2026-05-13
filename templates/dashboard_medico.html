@@ -106,6 +106,16 @@
       return Number.isNaN(dt.getTime()) ? rawValue : dt.toLocaleString('pt-BR');
     }
 
+    function formatAge(rawValue) {
+      if (!rawValue) return '--';
+      const dt = new Date(rawValue);
+      if (Number.isNaN(dt.getTime())) return formatDateTime(rawValue);
+      const seconds = Math.max(0, Math.round((Date.now() - dt.getTime()) / 1000));
+      if (seconds < 3) return 'agora';
+      if (seconds < 60) return `${seconds}s atrás`;
+      return `${Math.round(seconds / 60)}min atrás`;
+    }
+
     function estimateKcal(patient) {
       const avg = Number(patient.media_bpm || 0);
       const samples = Number(patient.total_historico || 0);
@@ -116,6 +126,17 @@
     function setText(card, field, value) {
       const el = card.querySelector(`[data-field="${field}"]`);
       if (el) el.textContent = value;
+    }
+
+    function setBpmColor(card, bpm) {
+      const el = card.querySelector('[data-field="bpm_atual"]');
+      if (!el) return;
+      el.classList.remove('text-rose-300', 'text-cyan-200', 'animate-pulse');
+      if (Number(bpm) > 100) {
+        el.classList.add('text-rose-300', 'animate-pulse');
+      } else {
+        el.classList.add('text-cyan-200');
+      }
     }
 
     function applyPatientToCard(patient) {
@@ -130,6 +151,18 @@
       setText(card, 'ultimo_evento', formatDateTime(patient.ultimo_evento));
       setText(card, 'status_badge', bpm === '--' ? '🟡 Sem leitura recente' : '🟢 Sinal Forte');
       setText(card, 'connection_status', bpm === '--' ? 'Aguardando' : 'Conectado');
+      setBpmColor(card, bpm);
+    }
+
+    function applyLatestVital(patientId, vital) {
+      const card = document.querySelector(`[data-paciente-id="${patientId}"]`);
+      if (!card || !vital) return;
+      const bpm = vital.bpm ?? '--';
+      setText(card, 'bpm_atual', bpm);
+      setText(card, 'ultimo_evento', vital.is_recent ? 'agora' : formatAge(vital.timestamp));
+      setText(card, 'status_badge', vital.is_recent ? '🟢 Pulsoid real' : '🟡 Sem leitura recente');
+      setText(card, 'connection_status', vital.is_recent ? 'Conectado' : 'Aguardando');
+      setBpmColor(card, bpm);
     }
 
     function applyLiveMirror() {
@@ -146,6 +179,7 @@
         setText(card, 'ultimo_evento', `${Math.max(1, Math.round(ageMs / 1000))}s atrás`);
         setText(card, 'status_badge', '🟢 Pulsoid ao vivo');
         setText(card, 'connection_status', 'Ao vivo');
+        setBpmColor(card, live.bpm);
       } catch (error) {
         console.warn('Falha ao ler espelho local do Pulsoid', error);
       }
@@ -265,8 +299,22 @@
       }
     }
 
+    async function refreshLatestVitals() {
+      try {
+        const response = await fetch('/api/medico/vitals/latest');
+        if (!response.ok) throw new Error('latest vitals status not ok');
+        const data = await response.json();
+        Object.entries(data.patients || {}).forEach(([patientId, vital]) => applyLatestVital(patientId, vital));
+      } catch (error) {
+        console.warn('Falha ao atualizar últimos batimentos', error);
+        applyLiveMirror();
+      }
+    }
+
     refreshPatientCards();
-    setInterval(refreshPatientCards, 3000);
+    refreshLatestVitals();
+    setInterval(refreshPatientCards, 15000);
+    setInterval(refreshLatestVitals, 5000);
     setInterval(applyLiveMirror, 1000);
   </script>
 </body>
