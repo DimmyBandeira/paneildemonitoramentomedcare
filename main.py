@@ -237,6 +237,14 @@ def _build_local_insight(nome: str, idade: int, media_bpm: float, pico_bpm: int,
     )
 
 
+def _build_ai_unavailable_insight(fallback: str) -> str:
+    return (
+        "A análise automática por IA não está disponível neste momento. "
+        "O relatório abaixo foi gerado pelo motor local de apoio clínico com base nos dados coletados.\n\n"
+        f"{fallback}"
+    )
+
+
 @app.post("/api/gemini/analyze/{paciente_id}")
 def gemini_analyze(paciente_id: int) -> dict[str, Any]:
     with closing(get_conn()) as conn:
@@ -290,7 +298,7 @@ def gemini_analyze(paciente_id: int) -> dict[str, Any]:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return {
-            "insight": fallback,
+            "insight": _build_ai_unavailable_insight(fallback),
             "media_bpm": media_bpm,
             "pico_bpm": pico_bpm,
             "source": "fallback_no_api_key",
@@ -326,27 +334,17 @@ def gemini_analyze(paciente_id: int) -> dict[str, Any]:
             "source": "gemini",
         }
 
-    except genai_errors.ClientError as exc:
+    except genai_errors.ClientError:
         return {
-            "insight": (
-                "A IA externa não respondeu agora. "
-                "O sistema manteve a análise local abaixo.\n\n"
-                f"Motivo técnico: {exc}\n\n"
-                f"{fallback}"
-            ),
+            "insight": _build_ai_unavailable_insight(fallback),
             "media_bpm": media_bpm,
             "pico_bpm": pico_bpm,
-            "source": "fallback_gemini_client_error",
+            "source": "fallback_gemini_unavailable",
         }
 
-    except Exception as exc:
+    except Exception:
         return {
-            "insight": (
-                "Falha inesperada ao consultar a IA externa. "
-                "O sistema manteve a análise local abaixo.\n\n"
-                f"Motivo técnico: {exc}\n\n"
-                f"{fallback}"
-            ),
+            "insight": _build_ai_unavailable_insight(fallback),
             "media_bpm": media_bpm,
             "pico_bpm": pico_bpm,
             "source": "fallback_unexpected_error",
