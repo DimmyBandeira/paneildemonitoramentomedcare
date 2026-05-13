@@ -7,96 +7,273 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="min-h-screen bg-[#0f172a] text-slate-100 p-6">
-  <header class="mb-8 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-    <div>
-      <h1 class="text-3xl font-semibold">Painel Médico • Triagem em Tempo Real</h1>
-      <p class="mt-2 text-sm text-slate-400">Cards demo + paciente real com histórico consumido do Pulsoid.</p>
-    </div>
-    <a href="/dashboard/paciente" class="rounded-lg border border-cyan-400/30 px-4 py-2 text-sm text-cyan-300 hover:bg-cyan-400/10 transition">Abrir painel do Dimmy</a>
+  <header class="mb-6 flex items-center justify-between">
+    <h1 class="text-3xl font-semibold">Painel Médico • Triagem em Tempo Real</h1>
   </header>
 
-  <section class="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
+  <section class="grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
     {% for p in pacientes %}
-    {% set is_real = p['data_source'] == 'pulsoid_real' %}
-    {% set bpm = p['bpm_atual'] or 0 %}
-    <article class="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-5 shadow-lg shadow-rose-500/10" data-paciente-id="{{ p['id'] }}">
-      <div class="flex items-center justify-between gap-2">
-        {% if is_real %}
-        <span class="inline-flex items-center gap-1 rounded-full bg-cyan-500/15 px-3 py-1 text-xs font-medium text-cyan-300">Pulsoid Real</span>
-        {% else %}
-        <span class="inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-3 py-1 text-xs font-medium text-violet-300">Demo Simulado</span>
-        {% endif %}
-        {% if bpm >= 105 %}
-        <span class="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-3 py-1 text-xs font-medium text-rose-300">Atenção</span>
-        {% elif bpm >= 85 %}
-        <span class="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-300">Observação</span>
-        {% elif bpm > 0 %}
-        <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">Estável</span>
-        {% else %}
-        <span class="inline-flex items-center gap-1 rounded-full bg-slate-500/15 px-3 py-1 text-xs font-medium text-slate-300">Sem histórico</span>
-        {% endif %}
+    <article class="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-4 shadow-lg shadow-rose-500/10" data-paciente-id="{{ p['id'] }}">
+      <div class="flex items-center justify-between">
+        <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-1 text-[10px] font-medium text-emerald-300" data-field="status_badge">🟢 Sinal Forte</span>
+        <span class="inline-flex items-center gap-1 rounded-full bg-cyan-500/15 px-2 py-1 text-[10px] font-medium text-cyan-300">{{ p['data_source'] or 'demo' }}</span>
       </div>
+      <h2 class="mt-2 text-lg font-medium" data-field="patient_name">{{ p['nome'] }}</h2>
+      <p class="text-slate-400 text-xs">ID: {{ p['identificador'] }} • {{ p['idade'] }} anos</p>
+      <p class="mt-2 line-clamp-2 text-xs text-slate-400">{{ p['scenario'] }}</p>
 
-      <h2 class="mt-4 text-xl font-medium">{{ p['nome'] }}</h2>
-      <p class="text-slate-400 text-sm">CPF: {{ p['identificador'] }} • {{ p['idade'] }} anos</p>
-      <p class="mt-3 text-sm text-slate-300">{{ p['scenario'] or 'Monitoramento preventivo' }}</p>
-
-      <div class="mt-5 grid grid-cols-3 gap-3 text-center">
-        <div class="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-          <p class="text-[10px] uppercase tracking-wider text-slate-500">Atual</p>
-          <p class="mt-1 text-lg font-semibold text-emerald-400 bpm">{{ p['bpm_atual'] or '--' }}</p>
-        </div>
-        <div class="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-          <p class="text-[10px] uppercase tracking-wider text-slate-500">Média</p>
-          <p class="mt-1 text-lg font-semibold text-cyan-300">{{ p['media_bpm'] or '--' }}</p>
-        </div>
-        <div class="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-          <p class="text-[10px] uppercase tracking-wider text-slate-500">Pico</p>
-          <p class="mt-1 text-lg font-semibold text-rose-300">{{ p['pico_bpm'] or '--' }}</p>
+      <div class="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-400/10 p-3">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-[10px] uppercase tracking-wider text-cyan-200/80">Conexão</p>
+            <p class="mt-1 text-2xl font-bold text-cyan-200"><span data-field="bpm_atual">{{ p['bpm_atual'] or '--' }}</span> <span class="text-xs font-medium text-cyan-100/70">BPM</span></p>
+          </div>
+          <div class="text-right">
+            <p class="rounded-full bg-cyan-500/20 px-2 py-1 text-[10px] font-medium text-cyan-100" data-field="connection_status">{{ 'Conectado' if p['bpm_atual'] else 'Aguardando' }}</p>
+            <p class="mt-2 text-[10px] text-cyan-100/70">última sincronização</p>
+            <p class="text-xs font-semibold text-cyan-100" data-field="ultimo_evento">{{ p['ultimo_evento'] or '--' }}</p>
+          </div>
         </div>
       </div>
 
-      <p class="mt-3 text-xs text-slate-400">Histórico: {{ p['total_historico'] or 0 }} amostras • Última sincronização: {{ p['ultimo_evento'] or 'aguardando Pulsoid' }}</p>
-      <div class="mt-4 flex flex-wrap gap-3">
-        <button class="rounded-lg bg-rose-500 px-4 py-2 text-sm hover:bg-rose-400 transition" onclick="gerarAnalise({{ p['id'] }})">Gerar Análise IA</button>
-        <button class="rounded-lg border border-white/20 px-4 py-2 text-sm text-slate-200 hover:bg-white/10 transition" onclick="abrirHistorico({{ p['id'] }}, '{{ p['nome'] }}')">Ver Histórico</button>
+      <h3 class="mt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Estatísticas gerais</h3>
+      <div class="mt-2 grid grid-cols-2 gap-2">
+        <div class="rounded-lg border border-rose-400/20 bg-rose-400/10 p-2">
+          <p class="text-[10px] text-rose-200/80">Máxima</p>
+          <p class="text-base font-bold text-rose-200"><span data-field="pico_bpm">{{ p['pico_bpm'] or '--' }}</span> <span class="text-[10px] font-medium">BPM</span></p>
+        </div>
+        <div class="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-2">
+          <p class="text-[10px] text-emerald-200/80">Média</p>
+          <p class="text-base font-bold text-emerald-200"><span data-field="media_bpm">{{ p['media_bpm'] or '--' }}</span> <span class="text-[10px] font-medium">BPM</span></p>
+        </div>
+        <div class="rounded-lg border border-amber-400/20 bg-amber-400/10 p-2">
+          <p class="text-[10px] text-amber-200/80">Calorias</p>
+          <p class="text-base font-bold text-amber-200"><span data-field="estimated_kcal">--</span> <span class="text-[10px] font-medium">kcal</span></p>
+        </div>
+        <div class="rounded-lg border border-slate-400/20 bg-slate-400/10 p-2">
+          <p class="text-[10px] text-slate-200/80">Amostras</p>
+          <p class="text-base font-bold text-slate-200"><span data-field="total_historico">{{ p['total_historico'] or 0 }}</span></p>
+        </div>
       </div>
+
+      <button class="mt-3 w-full rounded-lg bg-rose-500 px-3 py-2 text-xs hover:bg-rose-400 transition" onclick="gerarAnalise({{ p['id'] }})">Gerar Análise IA</button>
     </article>
     {% endfor %}
   </section>
 
-  <div id="modal" class="hidden fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm items-center justify-center p-4">
-    <div class="w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl shadow-rose-500/20">
-      <div class="flex justify-between items-center">
-        <h3 id="modal-title" class="text-xl font-semibold">Relatório Cardiológico</h3>
-        <button class="text-slate-300 hover:text-white" onclick="closeModal()">✕</button>
+  <div id="modal" class="hidden fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm overflow-y-auto p-4 md:p-8">
+    <div id="report-sheet" class="mx-auto w-full max-w-[794px] min-h-[1123px] rounded-xl bg-white text-slate-900 p-6 md:p-10 shadow-2xl">
+      <div class="flex items-start justify-between border-b border-slate-200 pb-4">
+        <div>
+          <p class="text-xs uppercase tracking-[0.25em] text-slate-500">Medcare Monitor</p>
+          <h3 class="mt-1 text-2xl font-semibold">Relatório Cardiológico Assistido</h3>
+          <p class="text-sm text-slate-500">Documento de apoio clínico gerado a partir de telemetria cardíaca.</p>
+        </div>
+        <button class="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-100" onclick="closeModal()">✕</button>
       </div>
-      <div class="mt-4 rounded-xl bg-white/5 border border-white/10 p-5">
-        <p id="modal-subtitle" class="text-xs uppercase tracking-[0.2em] text-slate-400">Laudo assistido por IA</p>
-        <pre id="modal-content" class="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-100 font-mono">Carregando...</pre>
+      <div class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+        <div><span class="font-semibold text-slate-900">Origem:</span> Monitor Cardiago / IA</div>
+        <div><span class="font-semibold text-slate-900">Tipo:</span> Relatório preliminar</div>
+        <div id="report-generated-at"></div>
+        <div><span class="font-semibold text-slate-900">Status:</span> Não substitui avaliação médica</div>
       </div>
-      <div class="mt-4 flex justify-end gap-3">
-        <button class="rounded-lg border border-white/20 px-4 py-2 text-sm text-slate-200 hover:bg-white/10 transition" onclick="window.print()">Imprimir Relatório</button>
-        <button class="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-900 hover:bg-cyan-400 transition" onclick="window.print()">Baixar PDF</button>
+      <div class="mt-6">
+        <h4 class="border-b border-slate-200 pb-2 text-sm font-semibold uppercase tracking-wider text-slate-700">Resultado da análise</h4>
+        <div id="modal-content" class="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-800"></div>
+      </div>
+      <div class="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">
+        Este relatório é informativo, baseado em dados de monitoramento, e não substitui consulta médica, diagnóstico ou conduta clínica presencial.
+      </div>
+      <div class="mt-10 grid grid-cols-2 gap-8 text-xs text-slate-500">
+        <div class="border-t border-slate-300 pt-2">Responsável técnico / Médico</div>
+        <div class="border-t border-slate-300 pt-2">Data e assinatura</div>
+      </div>
+      <div class="mt-6 flex justify-end gap-3">
+        <button class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100" onclick="closeModal()">Fechar</button>
+        <button class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700" onclick="printReport()">Imprimir / Salvar PDF</button>
       </div>
     </div>
   </div>
 
   <script>
-    function openModal(content, title = 'Relatório Cardiológico', subtitle = 'Laudo assistido por IA') {
-      document.getElementById('modal-title').textContent = title;
-      document.getElementById('modal-subtitle').textContent = subtitle;
-      document.getElementById('modal-content').textContent = content;
-      const modal = document.getElementById('modal');
+    const modal = document.getElementById('modal');
+    const reportSheet = document.getElementById('report-sheet');
+    const modalContent = document.getElementById('modal-content');
+
+    function formatDateTime(rawValue) {
+      if (!rawValue) return '--';
+      const dt = new Date(rawValue);
+      return Number.isNaN(dt.getTime()) ? rawValue : dt.toLocaleString('pt-BR');
+    }
+
+    function formatAge(rawValue) {
+      if (!rawValue) return '--';
+      const dt = new Date(rawValue);
+      if (Number.isNaN(dt.getTime())) return formatDateTime(rawValue);
+      const seconds = Math.max(0, Math.round((Date.now() - dt.getTime()) / 1000));
+      if (seconds < 3) return 'agora';
+      if (seconds < 60) return `${seconds}s atrás`;
+      return `${Math.round(seconds / 60)}min atrás`;
+    }
+
+    function estimateKcal(patient) {
+      const avg = Number(patient.media_bpm || 0);
+      const samples = Number(patient.total_historico || 0);
+      if (!avg || !samples) return '--';
+      return Math.max(1, Math.round((avg * samples) / 120));
+    }
+
+    function setText(card, field, value) {
+      const el = card.querySelector(`[data-field="${field}"]`);
+      if (el) el.textContent = value;
+    }
+
+    function setBpmColor(card, bpm) {
+      const el = card.querySelector('[data-field="bpm_atual"]');
+      if (!el) return;
+      el.classList.remove('text-rose-300', 'text-cyan-200', 'animate-pulse');
+      if (Number(bpm) > 100) {
+        el.classList.add('text-rose-300', 'animate-pulse');
+      } else {
+        el.classList.add('text-cyan-200');
+      }
+    }
+
+    function applyPatientToCard(patient) {
+      const card = document.querySelector(`[data-paciente-id="${patient.id}"]`);
+      if (!card) return;
+      const bpm = patient.bpm_atual ?? '--';
+      setText(card, 'bpm_atual', bpm);
+      setText(card, 'media_bpm', patient.media_bpm ?? '--');
+      setText(card, 'pico_bpm', patient.pico_bpm ?? '--');
+      setText(card, 'total_historico', patient.total_historico ?? 0);
+      setText(card, 'estimated_kcal', estimateKcal(patient));
+      setText(card, 'ultimo_evento', formatDateTime(patient.ultimo_evento));
+      setText(card, 'status_badge', bpm === '--' ? '🟡 Sem leitura recente' : '🟢 Sinal Forte');
+      setText(card, 'connection_status', bpm === '--' ? 'Aguardando' : 'Conectado');
+      setBpmColor(card, bpm);
+    }
+
+    function applyLatestVital(patientId, vital) {
+      const card = document.querySelector(`[data-paciente-id="${patientId}"]`);
+      if (!card || !vital) return;
+      const bpm = vital.bpm ?? '--';
+      setText(card, 'bpm_atual', bpm);
+      setText(card, 'ultimo_evento', vital.is_recent ? 'agora' : formatAge(vital.timestamp));
+      setText(card, 'status_badge', vital.is_recent ? '🟢 Pulsoid real' : '🟡 Sem leitura recente');
+      setText(card, 'connection_status', vital.is_recent ? 'Conectado' : 'Aguardando');
+      setBpmColor(card, bpm);
+    }
+
+    function applyLiveMirror() {
+      const lastRaw = localStorage.getItem('medcare_last_live_bpm');
+      if (!lastRaw) return;
+      try {
+        const live = JSON.parse(lastRaw);
+        if (!live?.patientId || !live?.bpm) return;
+        const ageMs = Date.now() - new Date(live.timestamp).getTime();
+        if (Number.isNaN(ageMs) || ageMs > 60000) return;
+        const card = document.querySelector(`[data-paciente-id="${live.patientId}"]`);
+        if (!card) return;
+        setText(card, 'bpm_atual', live.bpm);
+        setText(card, 'ultimo_evento', `${Math.max(1, Math.round(ageMs / 1000))}s atrás`);
+        setText(card, 'status_badge', '🟢 Pulsoid ao vivo');
+        setText(card, 'connection_status', 'Ao vivo');
+        setBpmColor(card, live.bpm);
+      } catch (error) {
+        console.warn('Falha ao ler espelho local do Pulsoid', error);
+      }
+    }
+
+    function openModal(content) {
+      modalContent.textContent = content;
+      document.getElementById('report-generated-at').innerHTML = `<span class="font-semibold text-slate-900">Gerado em:</span> ${new Date().toLocaleString('pt-BR')}`;
       modal.classList.remove('hidden');
-      modal.classList.add('flex');
     }
 
     function closeModal() {
-      const modal = document.getElementById('modal');
       modal.classList.add('hidden');
-      modal.classList.remove('flex');
     }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function buildPrintableReportHtml() {
+      const content = escapeHtml(modalContent.textContent || '').replace(/\n/g, '<br>');
+      const generatedAt = escapeHtml(new Date().toLocaleString('pt-BR'));
+      return `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Relatório Cardiológico</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; color: #111827; font-family: Arial, sans-serif; }
+    .sheet { width: 100%; min-height: 100vh; }
+    .topline { font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: #64748b; }
+    h1 { margin: 6px 0 4px; font-size: 24px; color: #0f172a; }
+    .subtitle { margin: 0; color: #475569; font-size: 13px; }
+    .header { border-bottom: 2px solid #e2e8f0; padding-bottom: 16px; margin-bottom: 16px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; font-size: 12px; color: #475569; margin-bottom: 22px; }
+    .section-title { font-size: 12px; letter-spacing: 1.4px; text-transform: uppercase; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 14px; font-weight: 700; }
+    .content { line-height: 1.65; font-size: 13px; color: #1f2937; }
+    .warning { margin-top: 24px; border: 1px solid #fde68a; background: #fffbeb; color: #92400e; border-radius: 10px; padding: 12px; font-size: 12px; line-height: 1.5; }
+    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 52px; font-size: 11px; color: #64748b; }
+    .signature { border-top: 1px solid #94a3b8; padding-top: 8px; }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <section class="header">
+      <div class="topline">Medcare Monitor</div>
+      <h1>Relatório Cardiológico Assistido</h1>
+      <p class="subtitle">Documento de apoio clínico gerado a partir de telemetria cardíaca.</p>
+    </section>
+    <section class="meta">
+      <div><strong>Origem:</strong> Monitor Cardiago / IA</div>
+      <div><strong>Tipo:</strong> Relatório preliminar</div>
+      <div><strong>Gerado em:</strong> ${generatedAt}</div>
+      <div><strong>Status:</strong> Não substitui avaliação médica</div>
+    </section>
+    <section>
+      <div class="section-title">Resultado da análise</div>
+      <div class="content">${content}</div>
+    </section>
+    <section class="warning">Este relatório é informativo, baseado em dados de monitoramento, e não substitui consulta médica, diagnóstico ou conduta clínica presencial.</section>
+    <section class="signatures">
+      <div class="signature">Responsável técnico / Médico</div>
+      <div class="signature">Data e assinatura</div>
+    </section>
+  </main>
+</body>
+</html>`;
+    }
+
+    function printReport() {
+      const printWindow = window.open('', '_blank', 'width=900,height=1100');
+      if (!printWindow) {
+        alert('Permita pop-ups para imprimir o relatório.');
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(buildPrintableReportHtml());
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 300);
+    }
+
+    modal.addEventListener('click', () => closeModal());
+    reportSheet.addEventListener('click', (event) => event.stopPropagation());
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+    });
 
     async function gerarAnalise(pacienteId) {
       openModal('Gerando análise clínica...', 'Relatório Cardiológico (IA)');
@@ -124,6 +301,37 @@
         openModal(`Falha ao carregar histórico.\n${error}`, 'Erro no histórico');
       }
     }
+
+    async function refreshPatientCards() {
+      try {
+        const response = await fetch('/api/patients/summary');
+        if (!response.ok) throw new Error('status not ok');
+        const data = await response.json();
+        (data.patients || []).forEach(applyPatientToCard);
+      } catch (error) {
+        console.warn('Falha ao atualizar cards de pacientes', error);
+      } finally {
+        applyLiveMirror();
+      }
+    }
+
+    async function refreshLatestVitals() {
+      try {
+        const response = await fetch('/api/medico/vitals/latest');
+        if (!response.ok) throw new Error('latest vitals status not ok');
+        const data = await response.json();
+        Object.entries(data.patients || {}).forEach(([patientId, vital]) => applyLatestVital(patientId, vital));
+      } catch (error) {
+        console.warn('Falha ao atualizar últimos batimentos', error);
+        applyLiveMirror();
+      }
+    }
+
+    refreshPatientCards();
+    refreshLatestVitals();
+    setInterval(refreshPatientCards, 15000);
+    setInterval(refreshLatestVitals, 5000);
+    setInterval(applyLiveMirror, 1000);
   </script>
 </body>
 </html>

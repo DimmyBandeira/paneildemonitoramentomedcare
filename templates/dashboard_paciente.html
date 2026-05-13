@@ -24,30 +24,27 @@
     <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.25),transparent_45%)]"></div>
     <div class="absolute bottom-0 left-0 right-0 h-24 bg-[linear-gradient(90deg,transparent_0%,#22d3ee_15%,transparent_30%,#22d3ee_45%,transparent_60%,#22d3ee_75%,transparent_100%)] animate-[ecg_2.8s_linear_infinite]"></div>
   </div>
-  <main class="relative w-full max-w-xl rounded-3xl border border-white/10 bg-white/5 backdrop-blur-2xl p-8 text-center shadow-2xl shadow-rose-500/20">
-    <div class="mb-5 inline-flex rounded-full bg-cyan-500/15 px-3 py-1 text-xs font-medium text-cyan-300">Pulsoid Real</div>
+  <main class="w-full max-w-xl rounded-3xl border border-white/10 bg-white/5 backdrop-blur-2xl p-8 text-center shadow-2xl shadow-rose-500/20">
     <h1 class="text-2xl font-semibold">Telemetria em Tempo Real</h1>
-    <p class="text-slate-300 mt-2">Paciente {{ paciente['nome'] }} • {{ paciente['idade'] }} anos</p>
-    <p class="text-xs text-slate-500 mt-1">CPF: {{ paciente['identificador'] }}</p>
+    <p class="text-slate-300 mt-2">Paciente {{ paciente['nome'] }}</p>
     <div id="heart-icon" class="mt-8 text-7xl text-rose-500 drop-shadow-[0_0_18px_rgba(244,63,94,0.6)] animate-[heartbeat_1.2s_ease-in-out_infinite]">❤</div>
     <div id="bpm" class="mt-4 text-6xl font-bold text-emerald-400 transition-colors duration-300">--</div>
     <p id="status" class="mt-2 text-emerald-400">Conectando ao sensor...</p>
-    <p id="save-status" class="mt-2 text-xs text-slate-400">Aguardando primeira amostra para gravar histórico real.</p>
-    <div class="mt-6 flex justify-center gap-3">
-      <a href="/dashboard/medico" class="rounded-lg border border-white/20 px-4 py-2 text-sm text-slate-200 hover:bg-white/10 transition">Voltar ao médico</a>
-    </div>
+    <p id="save-status" class="mt-2 text-xs text-slate-400">Aguardando primeira leitura para sincronizar com o painel médico.</p>
   </main>
 
   <script>
     const token = "{{ pulsoid_token }}";
-    const pacienteId = Number("{{ paciente['id'] }}");
+    const patientId = Number("{{ paciente['id'] }}");
+    const patientName = "{{ paciente['nome'] }}";
     const bpmEl = document.getElementById('bpm');
     const statusEl = document.getElementById('status');
     const saveStatusEl = document.getElementById('save-status');
-    let lastSavedBpm = null;
-    let lastSavedAt = 0;
+    let latestBpm = 0;
+    let latestBpmAt = null;
+    let isPosting = false;
 
-    function updateBpmColor(bpm) {
+    function setBpmColor(bpm) {
       bpmEl.classList.remove('text-emerald-400', 'text-amber-400', 'text-rose-400');
       if (bpm > 100) {
         bpmEl.classList.add('text-rose-400');
@@ -58,39 +55,50 @@
       }
     }
 
-    async function saveBpm(bpm) {
-      const now = Date.now();
-      const shouldThrottle = lastSavedBpm === bpm && now - lastSavedAt < 15000;
-      if (shouldThrottle) {
-        return;
-      }
-      lastSavedBpm = bpm;
-      lastSavedAt = now;
+    function mirrorBpmToMedicalDashboard(bpm) {
+      const payload = {
+        patientId,
+        patientName,
+        bpm,
+        timestamp: new Date().toISOString(),
+        source: 'pulsoid_browser_live'
+      };
+      localStorage.setItem(`medcare_live_bpm_${patientId}`, JSON.stringify(payload));
+      localStorage.setItem('medcare_last_live_bpm', JSON.stringify(payload));
+    }
 
+    async function postLatestBpm() {
+      if (!latestBpm || isPosting) return;
+
+      isPosting = true;
       try {
-        const response = await fetch(`/api/vitals/${pacienteId}`, {
+        const response = await fetch(`/api/vitals/${patientId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bpm, source: 'pulsoid_real' })
+          body: JSON.stringify({ bpm: latestBpm, source: 'pulsoid_real' })
         });
+
         if (!response.ok) {
           const data = await response.json();
-          saveStatusEl.textContent = data.detail || 'Falha ao gravar histórico.';
-          saveStatusEl.className = 'mt-2 text-xs text-rose-300';
+          saveStatusEl.textContent = `${data.detail || 'Falha ao gravar no banco.'} Atualização local mantida.`;
+          saveStatusEl.className = 'mt-2 text-xs text-amber-300';
           return;
         }
-        saveStatusEl.textContent = `Histórico real gravado: ${bpm} BPM`;
+
+        saveStatusEl.textContent = `Painel médico sincronizado: ${latestBpm} BPM`;
         saveStatusEl.className = 'mt-2 text-xs text-emerald-300';
       } catch (error) {
-        saveStatusEl.textContent = `Falha ao gravar histórico: ${error}`;
-        saveStatusEl.className = 'mt-2 text-xs text-rose-300';
+        saveStatusEl.textContent = `Banco indisponível; painel médico atualizado localmente: ${latestBpm} BPM`;
+        saveStatusEl.className = 'mt-2 text-xs text-amber-300';
+      } finally {
+        isPosting = false;
       }
     }
 
-    if (!token) {
-      statusEl.textContent = 'PULSOID_TOKEN não configurado no .env';
+    if (!token || token === 'TOKEN_DO_PACIENTE') {
+      statusEl.textContent = 'PULSOID_TOKEN não configurado';
       statusEl.className = 'mt-2 text-rose-400';
-      saveStatusEl.textContent = 'Sem token não é possível consumir dados reais do Pulsoid.';
+      saveStatusEl.textContent = 'Sem token não há leitura real para sincronizar.';
       saveStatusEl.className = 'mt-2 text-xs text-rose-300';
     } else {
       const ws = new WebSocket(`wss://dev.pulsoid.net/api/v1/data/real_time?access_token=${token}`);
@@ -105,9 +113,11 @@
           const payload = JSON.parse(event.data);
           const bpm = Number(payload?.data?.heart_rate ?? payload?.heart_rate ?? 0);
           if (bpm > 0) {
+            latestBpm = bpm;
+            latestBpmAt = new Date();
             bpmEl.textContent = bpm;
-            updateBpmColor(bpm);
-            saveBpm(bpm);
+            setBpmColor(bpm);
+            mirrorBpmToMedicalDashboard(bpm);
           }
         } catch (error) {
           saveStatusEl.textContent = `Payload inválido do Pulsoid: ${error}`;
@@ -116,9 +126,11 @@
       };
 
       ws.onerror = ws.onclose = () => {
-        statusEl.textContent = 'Sensor desconectado ou token inválido';
+        statusEl.textContent = 'Sensor Desconectado (Baixa Adesão ao monitoramento)';
         statusEl.className = 'mt-2 text-rose-400';
       };
+
+      setInterval(postLatestBpm, 5000);
     }
   </script>
 </body>
