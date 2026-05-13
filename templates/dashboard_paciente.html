@@ -40,8 +40,9 @@
     const bpmEl = document.getElementById('bpm');
     const statusEl = document.getElementById('status');
     const saveStatusEl = document.getElementById('save-status');
-    let lastSavedBpm = null;
-    let lastSavedAt = 0;
+    let latestBpm = 0;
+    let latestBpmAt = null;
+    let isPosting = false;
 
     function setBpmColor(bpm) {
       bpmEl.classList.remove('text-emerald-400', 'text-amber-400', 'text-rose-400');
@@ -66,24 +67,15 @@
       localStorage.setItem('medcare_last_live_bpm', JSON.stringify(payload));
     }
 
-    async function saveBpm(bpm) {
-      mirrorBpmToMedicalDashboard(bpm);
+    async function postLatestBpm() {
+      if (!latestBpm || isPosting) return;
 
-      const now = Date.now();
-      if (lastSavedBpm === bpm && now - lastSavedAt < 15000) {
-        saveStatusEl.textContent = `Painel médico atualizado localmente: ${bpm} BPM`;
-        saveStatusEl.className = 'mt-2 text-xs text-cyan-300';
-        return;
-      }
-
-      lastSavedBpm = bpm;
-      lastSavedAt = now;
-
+      isPosting = true;
       try {
         const response = await fetch(`/api/vitals/${patientId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bpm, source: 'pulsoid_real' })
+          body: JSON.stringify({ bpm: latestBpm, source: 'pulsoid_real' })
         });
 
         if (!response.ok) {
@@ -93,11 +85,13 @@
           return;
         }
 
-        saveStatusEl.textContent = `Painel médico sincronizado: ${bpm} BPM`;
+        saveStatusEl.textContent = `Painel médico sincronizado: ${latestBpm} BPM`;
         saveStatusEl.className = 'mt-2 text-xs text-emerald-300';
       } catch (error) {
-        saveStatusEl.textContent = `Banco indisponível; painel médico atualizado localmente: ${bpm} BPM`;
+        saveStatusEl.textContent = `Banco indisponível; painel médico atualizado localmente: ${latestBpm} BPM`;
         saveStatusEl.className = 'mt-2 text-xs text-amber-300';
+      } finally {
+        isPosting = false;
       }
     }
 
@@ -119,9 +113,11 @@
           const payload = JSON.parse(event.data);
           const bpm = Number(payload?.data?.heart_rate ?? payload?.heart_rate ?? 0);
           if (bpm > 0) {
+            latestBpm = bpm;
+            latestBpmAt = new Date();
             bpmEl.textContent = bpm;
             setBpmColor(bpm);
-            saveBpm(bpm);
+            mirrorBpmToMedicalDashboard(bpm);
           }
         } catch (error) {
           saveStatusEl.textContent = `Payload inválido do Pulsoid: ${error}`;
@@ -133,6 +129,8 @@
         statusEl.textContent = 'Sensor Desconectado (Baixa Adesão ao monitoramento)';
         statusEl.className = 'mt-2 text-rose-400';
       };
+
+      setInterval(postLatestBpm, 5000);
     }
   </script>
 </body>
