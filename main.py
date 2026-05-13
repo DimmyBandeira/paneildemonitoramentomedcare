@@ -34,6 +34,17 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _is_recent_timestamp(raw_value: str | None, max_age_seconds: int = 30) -> bool:
+    if not raw_value:
+        return False
+    try:
+        timestamp = datetime.fromisoformat(raw_value)
+    except ValueError:
+        return False
+    age = datetime.utcnow() - timestamp
+    return timedelta(seconds=0) <= age <= timedelta(seconds=max_age_seconds)
+
+
 def init_db() -> None:
     with closing(get_conn()) as conn:
         cur = conn.cursor()
@@ -150,6 +161,34 @@ def dashboard_medico(request: Request):
 def get_patients_summary() -> dict[str, list[dict[str, Any]]]:
     with closing(get_conn()) as conn:
         patients = fetch_patients_summary(conn)
+    return {"patients": patients}
+
+
+@app.get("/api/medico/vitals/latest")
+def get_latest_vitals() -> dict[str, dict[str, dict[str, Any]]]:
+    with closing(get_conn()) as conn:
+        rows = conn.execute(
+            """
+            SELECT vh.paciente_id, vh.bpm, vh.timestamp
+            FROM vitals_history vh
+            INNER JOIN (
+                SELECT paciente_id, MAX(timestamp) AS max_timestamp
+                FROM vitals_history
+                GROUP BY paciente_id
+            ) latest
+              ON latest.paciente_id = vh.paciente_id
+             AND latest.max_timestamp = vh.timestamp
+            """
+        ).fetchall()
+
+    patients: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        timestamp = row["timestamp"]
+        patients[str(row["paciente_id"])] = {
+            "bpm": row["bpm"],
+            "timestamp": timestamp,
+            "is_recent": _is_recent_timestamp(timestamp),
+        }
     return {"patients": patients}
 
 
