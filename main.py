@@ -3,16 +3,16 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
-from typing import Any
 from pathlib import Path
+from typing import Any
 
-# import google.generativeai as genai
-from google import genai
-from google.genai import errors as genai_errors
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
+from google import genai
+from google.genai import errors as genai_errors
+from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "vitals.db"
@@ -21,6 +21,11 @@ TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 load_dotenv()
 
 app = FastAPI(title="Monitor Cardiago - Monolito Modular MVP")
+
+
+class VitalPayload(BaseModel):
+    bpm: int = Field(..., ge=25, le=240)
+    source: str = Field(default="pulsoid_real", max_length=40)
 
 
 def get_conn() -> sqlite3.Connection:
@@ -92,7 +97,6 @@ async def auth_route(request: Request):
         return {"redirect_url": f"/dashboard/paciente?cpf={credential}"}
 
     return JSONResponse(status_code=400, content={"error": "Formato inválido. Use CRM/SP123456 ou CPF com 11 dígitos."})
-
 
 
 def fetch_patients_summary(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -175,6 +179,29 @@ def dashboard_paciente(request: Request, cpf: str | None = None):
         name="dashboard_paciente.html",
         context={"paciente": paciente, "pulsoid_token": pulsoid_token},
     )
+
+
+@app.post("/api/vitals/{paciente_id}")
+def save_vital(paciente_id: int, payload: VitalPayload) -> dict[str, Any]:
+    with closing(get_conn()) as conn:
+        paciente = conn.execute(
+            "SELECT id FROM users WHERE id=? AND tipo='paciente' LIMIT 1",
+            (paciente_id,),
+        ).fetchone()
+        if not paciente:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+
+        timestamp = datetime.utcnow().isoformat()
+        conn.execute(
+            """
+            INSERT INTO vitals_history (paciente_id, bpm, timestamp)
+            VALUES (?, ?, ?)
+            """,
+            (paciente_id, payload.bpm, timestamp),
+        )
+        conn.commit()
+
+    return {"ok": True, "paciente_id": paciente_id, "bpm": payload.bpm, "timestamp": timestamp}
 
 
 def _build_local_insight(nome: str, idade: int, media_bpm: float, pico_bpm: int, total: int) -> str:
