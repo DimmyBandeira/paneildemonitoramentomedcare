@@ -36,6 +36,7 @@
   <script>
     const token = "{{ pulsoid_token }}";
     const patientId = Number("{{ paciente['id'] }}");
+    const patientName = "{{ paciente['nome'] }}";
     const bpmEl = document.getElementById('bpm');
     const statusEl = document.getElementById('status');
     const saveStatusEl = document.getElementById('save-status');
@@ -53,9 +54,25 @@
       }
     }
 
+    function mirrorBpmToMedicalDashboard(bpm) {
+      const payload = {
+        patientId,
+        patientName,
+        bpm,
+        timestamp: new Date().toISOString(),
+        source: 'pulsoid_browser_live'
+      };
+      localStorage.setItem(`medcare_live_bpm_${patientId}`, JSON.stringify(payload));
+      localStorage.setItem('medcare_last_live_bpm', JSON.stringify(payload));
+    }
+
     async function saveBpm(bpm) {
+      mirrorBpmToMedicalDashboard(bpm);
+
       const now = Date.now();
       if (lastSavedBpm === bpm && now - lastSavedAt < 15000) {
+        saveStatusEl.textContent = `Painel médico atualizado localmente: ${bpm} BPM`;
+        saveStatusEl.className = 'mt-2 text-xs text-cyan-300';
         return;
       }
 
@@ -71,16 +88,16 @@
 
         if (!response.ok) {
           const data = await response.json();
-          saveStatusEl.textContent = data.detail || 'Falha ao sincronizar com painel médico.';
-          saveStatusEl.className = 'mt-2 text-xs text-rose-300';
+          saveStatusEl.textContent = `${data.detail || 'Falha ao gravar no banco.'} Atualização local mantida.`;
+          saveStatusEl.className = 'mt-2 text-xs text-amber-300';
           return;
         }
 
         saveStatusEl.textContent = `Painel médico sincronizado: ${bpm} BPM`;
         saveStatusEl.className = 'mt-2 text-xs text-emerald-300';
       } catch (error) {
-        saveStatusEl.textContent = `Falha ao sincronizar com painel médico: ${error}`;
-        saveStatusEl.className = 'mt-2 text-xs text-rose-300';
+        saveStatusEl.textContent = `Banco indisponível; painel médico atualizado localmente: ${bpm} BPM`;
+        saveStatusEl.className = 'mt-2 text-xs text-amber-300';
       }
     }
 
